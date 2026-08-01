@@ -1,0 +1,244 @@
+from datetime import datetime, timedelta, timezone
+import requests
+from fastapi import HTTPException, status
+from sqlalchemy.orm import Session
+from app.core.config import settings
+from app.models.user import User
+from app.models.oauth_token import OAuthToken
+from app.schemas.auth import TokenResponse, UserResponse
+from app.auth.jwt import create_access_token, create_refresh_token, decode_token
+
+GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
+GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
+
+
+class AuthService:
+    @staticmethod
+    def get_google_auth_url() -> str:
+        """
+        Generates production Google OAuth 2.0 Consent URL with required scopes.
+        """
+        scopes = [
+            "openid",
+            "https://www.googleapis.com/auth/userinfo.email",
+            "https://www.googleapis.com/auth/userinfo.profile",
+            "https://www.googleapis.com/auth/gmail.readonly"
+        ]
+        scope_str = "%20".join(scopes)
+        
+        url = (
+            f"https://accounts.google.com/o/oauth2/v2/auth?"
+            f"client_id={settings.GOOGLE_CLIENT_ID}&"
+            f"redirect_uri={settings.GOOGLE_REDIRECT_URI}&"
+            f"response_type=code&"
+            f"scope={scope_str}&"
+            f"access_type=offline&"
+            f"prompt=consent"
+        )
+        return url
+
+    @classmethod
+    def process_google_callback(cls, db: Session, code: str) -> TokenResponse:
+        """
+        Exchanges Google OAuth authorization code for Google access/refresh tokens,
+        fetches authenticated Google user profile, creates/updates User in database,
+        stores OAuth token credentials, and issues MailShield JWT session tokens.
+        """
+        google_user = None
+        google_tokens = {}
+
+        # Isolate Demo Login strictly behind ENABLE_DEV_DEMO flag
+        if settings.ENABLE_DEV_DEMO and code == "demo_google_auth_code":
+            google_user = {
+                "id": "google_demo_1092837465",
+                "email": "demo.user@mailshield.ai",
+                "name": "Security Analyst (Demo User)",
+                "picture": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/user-check.svg"
+            }
+            google_tokens = {
+                "access_token": "demo_google_access_token_xyz123",
+                "refresh_token": "demo_google_refresh_token_abc789",
+                "expires_in": 3600,
+                "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
+                "token_type": "Bearer"
+            }
+        else:
+            # Production Real Google OAuth 2.0 Exchange
+            token_payload = {
+                "code": code,
+                "client_id": settings.GOOGLE_CLIENT_ID,
+                "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                "redirect_uri": settings.GOOGLE_REDIRECT_URI,
+                "grant_type": "authorization_code"
+            }
+            
+            try:
+                token_res = requests.post(GOOGLE_TOKEN_URL, data=token_payload, timeout=12)
+            except Exception as net_err:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail=f"Network error connecting to Google OAuth servers: {str(net_err)}"
+                )
+
+            if token_res.status_code != 200:
+                err_detail = token_res.json().get("error_description") or token_res.text
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"Google OAuth authorization code exchange failed: {err_detail}"
+                )
+
+            google_tokens = token_res.json()
+            access_token = google_tokens.get("access_token")
+            if not access_token:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No access token returned from Google OAuth exchange."
+                )
+
+            # Fetch authenticated User Profile from Google API
+            userinfo_res = requests.get(
+                GOOGLE_USERINFO_URL,
+                headers={"Authorization": f"Bearer {access_token}"},
+                timeout=10
+            )
+
+            if userinfo_res.status_code != 200:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Failed to retrieve user profile from Google UserInfo API."
+                )
+
+            google_user = userinfo_res.json()
+
+        if not google_user or "email" not in google_user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Invalid Google profile data returned."
+            )
+
+        # Database Upsert for User
+        user = db.query(User).filter(User.google_id == google_user["id"]).first()
+        if not user:
+            user = db.query(User).filter(User.email == google_user["email"]).first()
+
+        if user:
+            user.name = google_user.get("name", user.name)
+            user.avatar_url = google_user.get("picture", user.avatar_url)
+            user.google_id = google_user.get("id", user.google_id)
+        else:
+            user = User(
+                email=google_user["email"],
+                name=google_user.get("name", "MailShield User"),
+                avatar_url=google_user.get("picture"),
+                google_id=google_user["id"]
+            )
+            db.add(user)
+        
+        db.commit()
+        db.refresh(user)
+
+        # Database Upsert for OAuth Tokens
+        expires_in = google_tokens.get("expires_in", 3600)
+        expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        token_record = db.query(OAuthToken).filter(OAuthToken.user_id == user.id).first()
+        if token_record:
+            token_record.access_token = google_tokens.get("access_token", token_record.access_token)
+            if google_tokens.get("refresh_token"):
+                token_record.refresh_token = google_tokens.get("refresh_token")
+            token_record.expires_at = expires_at
+            token_record.scope = google_tokens.get("scope", token_record.scope)
+        else:
+            token_record = OAuthToken(
+                user_id=user.id,
+                access_token=google_tokens.get("access_token", ""),
+                refresh_token=google_tokens.get("refresh_token"),
+                scope=google_tokens.get("scope"),
+                expires_at=expires_at
+            )
+            db.add(token_record)
+            
+        db.commit()
+
+        # Issue MailShield JWT Tokens
+        jwt_payload = {"sub": user.id, "email": user.email, "name": user.name}
+        jwt_access_token = create_access_token(jwt_payload)
+        jwt_refresh_token = create_refresh_token(jwt_payload)
+
+        return TokenResponse(
+            access_token=jwt_access_token,
+            refresh_token=jwt_refresh_token,
+            token_type="Bearer",
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            user=UserResponse.model_validate(user)
+        )
+
+    @classmethod
+    def get_valid_google_access_token(cls, db: Session, user_id: str) -> str:
+        """
+        Retrieves the user's stored Google Access Token. If expired, automatically
+        refreshes it using the Google Refresh Token and updates the database.
+        """
+        token_record = db.query(OAuthToken).filter(OAuthToken.user_id == user_id).first()
+        if not token_record or not token_record.access_token:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google OAuth credentials not found for user. Please sign in again."
+            )
+
+        # Check token expiration buffer (5 minutes margin)
+        now_utc = datetime.now(timezone.utc)
+        token_exp = token_record.expires_at
+        if token_exp and token_exp.tzinfo is None:
+            token_exp = token_exp.replace(tzinfo=timezone.utc)
+
+        if token_exp and (token_exp - timedelta(minutes=5)) <= now_utc:
+            # Attempt automatic refresh if refresh_token is present
+            if token_record.refresh_token and not token_record.refresh_token.startswith("demo_"):
+                try:
+                    refresh_payload = {
+                        "client_id": settings.GOOGLE_CLIENT_ID,
+                        "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                        "refresh_token": token_record.refresh_token,
+                        "grant_type": "refresh_token"
+                    }
+                    res = requests.post(GOOGLE_TOKEN_URL, data=refresh_payload, timeout=10)
+                    if res.status_code == 200:
+                        new_data = res.json()
+                        token_record.access_token = new_data.get("access_token", token_record.access_token)
+                        new_expires_in = new_data.get("expires_in", 3600)
+                        token_record.expires_at = now_utc + timedelta(seconds=new_expires_in)
+                        db.commit()
+                except Exception as e:
+                    print(f"Failed to refresh Google Access Token automatically: {e}")
+
+        return token_record.access_token
+
+    @classmethod
+    def refresh_access_token(cls, db: Session, refresh_token: str) -> TokenResponse:
+        payload = decode_token(refresh_token)
+        if payload.get("type") != "refresh":
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid token type for refresh operation"
+            )
+
+        user_id = payload.get("sub")
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="User associated with refresh token not found"
+            )
+
+        jwt_payload = {"sub": user.id, "email": user.email, "name": user.name}
+        new_access_token = create_access_token(jwt_payload)
+        new_refresh_token = create_refresh_token(jwt_payload)
+
+        return TokenResponse(
+            access_token=new_access_token,
+            refresh_token=new_refresh_token,
+            token_type="Bearer",
+            expires_in=settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+            user=UserResponse.model_validate(user)
+        )
+
