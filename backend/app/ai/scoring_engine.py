@@ -20,7 +20,8 @@ class ScoringEngine:
         subject: str,
         body_text: str,
         links: list[str],
-        attachments: list[dict]
+        attachments: list[dict],
+        is_trusted_sender: bool = False
     ) -> dict:
         full_text = f"Subject: {subject}\nSender: {sender}\nBody: {body_text}"
         reasons: list[str] = []
@@ -122,6 +123,16 @@ class ScoringEngine:
         else:
             threat_type = "Misinformation"
             confidence = 0.82
+
+        if is_trusted_sender:
+            reasons.append("Sender verified as a Trusted Sender. Threat score reduced.")
+            if overall_score >= 80:
+                overall_score = 60
+            elif overall_score >= 40:
+                overall_score = 40
+            else:
+                overall_score = 5
+                threat_type = "Safe"
 
         # Deduplicate reasons & recommendations
         unique_reasons = list(dict.fromkeys(reasons))

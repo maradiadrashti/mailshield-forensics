@@ -82,6 +82,7 @@ export interface AnalysisResult {
   risk_score: number;
   confidence: number;
   threat_type: string;
+  is_trusted_sender: boolean;
   reasons: string[];
   recommendations: string[];
   breakdown: ThreatBreakdown;

@@ -60,13 +60,33 @@ export const EmailCard: React.FC<EmailCardProps> = ({ email, onClick, onInspect 
       {/* Footer Tags & Metadata */}
       <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs">
         <div className="flex items-center space-x-2">
-          {analysis && (
-            <Badge
-              variant={analysis.risk_score >= 70 ? 'danger' : analysis.risk_score >= 40 ? 'warning' : 'success'}
-              className="font-mono text-[10px] uppercase font-bold"
-            >
-              {analysis.threat_type}
-            </Badge>
+          {analysis && analysis.is_trusted_sender ? (
+            <>
+              <Badge variant="success" className="font-mono text-[10px] uppercase font-bold flex items-center gap-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                Trusted Sender
+              </Badge>
+              {analysis.risk_score >= 60 ? (
+                <Badge variant="danger" className="font-mono text-[10px] uppercase font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+                  High Risk
+                </Badge>
+              ) : analysis.risk_score >= 40 ? (
+                <Badge variant="warning" className="font-mono text-[10px] uppercase font-bold flex items-center gap-1">
+                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
+                  Suspicious URLs
+                </Badge>
+              ) : null}
+            </>
+          ) : (
+            analysis && (
+              <Badge
+                variant={analysis.risk_score >= 70 ? 'danger' : analysis.risk_score >= 40 ? 'warning' : 'success'}
+                className="font-mono text-[10px] uppercase font-bold"
+              >
+                {analysis.threat_type}
+              </Badge>
+            )
           )}
 
           {email.links.length > 0 && (

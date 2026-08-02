@@ -17,6 +17,7 @@ class AnalysisResultResponse(BaseModel):
     risk_score: int = Field(..., ge=0, le=100, description="MailShield Risk Score from 0 (safe) to 100 (high threat)")
     confidence: float = Field(..., ge=0.0, le=1.0, description="AI Confidence probability level")
     threat_type: str = Field(..., description="Categorized threat label")
+    is_trusted_sender: bool = Field(default=False, description="Whether the sender is verified as a Trusted Sender")
     reasons: list[str] = Field(default_factory=list, description="Explainable evidentiary reasons for score")
     recommendations: list[str] = Field(default_factory=list, description="Actionable security mitigation advice")
     breakdown: ThreatBreakdown

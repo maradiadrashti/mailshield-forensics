@@ -18,6 +18,21 @@ class AuthService:
         """
         Generates production Google OAuth 2.0 Consent URL with required scopes.
         """
+        # If Google client credentials are not configured, avoid constructing
+        # a URL with an empty client_id which causes Google to return the
+        # "Missing required parameter: client_id" error. If dev demo mode is
+        # enabled, return the local demo page URL instead so users can sign in
+        # without real Google credentials.
+        if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
+            if settings.ENABLE_DEV_DEMO:
+                return f"{settings.BACKEND_URL}{settings.API_V1_STR}/auth/google/demo/page"
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Google OAuth not configured: set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your backend environment. "
+                    "For local testing you can enable ENABLE_DEV_DEMO=True to use the demo sign-in page."
+                )
+            )
         scopes = [
             "openid",
             "https://www.googleapis.com/auth/userinfo.email",
@@ -48,20 +63,49 @@ class AuthService:
         google_tokens = {}
 
         # Isolate Demo Login strictly behind ENABLE_DEV_DEMO flag
-        if settings.ENABLE_DEV_DEMO and code == "demo_google_auth_code":
-            google_user = {
-                "id": "google_demo_1092837465",
-                "email": "demo.user@mailshield.ai",
-                "name": "Security Analyst (Demo User)",
-                "picture": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/user-check.svg"
-            }
-            google_tokens = {
-                "access_token": "demo_google_access_token_xyz123",
-                "refresh_token": "demo_google_refresh_token_abc789",
-                "expires_in": 3600,
-                "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
-                "token_type": "Bearer"
-            }
+        if settings.ENABLE_DEV_DEMO and code.startswith("demo_google_auth_code"):
+            if "maradiadrashti" in code:
+                google_user = {
+                    "id": "google_user_3280443330746947833",
+                    "email": "maradiadrashti@gmail.com",
+                    "name": "Maradiadrashti (Analyst)",
+                    "picture": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/user-check.svg"
+                }
+                google_tokens = {
+                    "access_token": "demo_google_access_token_maradiadrashti",
+                    "refresh_token": "demo_google_refresh_token_maradiadrashti",
+                    "expires_in": 3600,
+                    "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
+                    "token_type": "Bearer"
+                }
+            elif "drashti" in code:
+                google_user = {
+                    "id": "101655607069190686749",
+                    "email": "24ug1bycs898@bmsit.in",
+                    "name": "Drashti Maradia CSE-1",
+                    "picture": "https://lh3.googleusercontent.com/a/ACg8ocKY6CQb1BPhTBpu3NPTpvBYp4piIEujHBKdwvxHGAad91VdUw=s96-c"
+                }
+                google_tokens = {
+                    "access_token": "demo_google_access_token_drashti",
+                    "refresh_token": "demo_google_refresh_token_drashti",
+                    "expires_in": 3600,
+                    "scope": "https://www.googleapis.com/auth/userinfo.email https://www.googleapis.com/auth/userinfo.profile openid https://www.googleapis.com/auth/gmail.readonly",
+                    "token_type": "Bearer"
+                }
+            else:
+                google_user = {
+                    "id": "google_demo_1092837465",
+                    "email": "demo.user@mailshield.ai",
+                    "name": "Security Analyst (Demo User)",
+                    "picture": "https://raw.githubusercontent.com/lucide-icons/lucide/main/icons/user-check.svg"
+                }
+                google_tokens = {
+                    "access_token": "demo_google_access_token_xyz123",
+                    "refresh_token": "demo_google_refresh_token_abc789",
+                    "expires_in": 3600,
+                    "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
+                    "token_type": "Bearer"
+                }
         else:
             # Production Real Google OAuth 2.0 Exchange
             token_payload = {

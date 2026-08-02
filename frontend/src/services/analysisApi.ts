@@ -2,8 +2,8 @@ import { apiClient } from './api';
 import { AnalysisResult, BatchAnalysisResponse } from '../types';
 
 export const analysisApi = {
-  analyzeEmail: async (emailId: string): Promise<AnalysisResult> => {
-    const response = await apiClient.post<AnalysisResult>(`/analysis/email/${emailId}`);
+  analyzeEmail: async (emailId: string, force = false): Promise<AnalysisResult> => {
+    const response = await apiClient.post<AnalysisResult>(`/analysis/email/${emailId}?force=${force}`);
     return response.data;
   },
 

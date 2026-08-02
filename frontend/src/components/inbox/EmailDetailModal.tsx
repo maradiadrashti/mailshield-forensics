@@ -1,15 +1,20 @@
-import React from 'react';
-import { X, Link2, Paperclip, Calendar, User, FileText } from 'lucide-react';
+import React, { useState } from 'react';
+import { X, Link2, Paperclip, Calendar, User, FileText, UserCheck, RefreshCw } from 'lucide-react';
 import { EmailMessage } from '../../types';
 import { Badge } from '../ui/Badge';
 import { formatDate } from '../../utils/formatters';
+import { trustedSenderApi } from '../../services/trustedSenderApi';
+import { analysisApi } from '../../services/analysisApi';
 
 interface EmailDetailModalProps {
   email: EmailMessage | null;
   onClose: () => void;
+  onTrustRefresh?: (updatedEmail: EmailMessage) => void;
 }
 
-export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ email, onClose }) => {
+export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ email, onClose, onTrustRefresh }) => {
+  const [trusting, setTrusting] = useState(false);
+
   if (!email) return null;
 
   const formatFileSize = (bytes: number) => {
@@ -18,6 +23,61 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ email, onClo
     const sizes = ['B', 'KB', 'MB', 'GB'];
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return `${parseFloat((bytes / Math.pow(k, i)).toFixed(1))} ${sizes[i]}`;
+  };
+
+  const handleTrustSender = async () => {
+    setTrusting(true);
+    try {
+      const match = email.sender.match(/<([^>]+)>/);
+      const cleanEmail = match ? match[1].trim().toLowerCase() : email.sender.trim().toLowerCase();
+
+      // 1. Add sender to trustlist
+      await trustedSenderApi.addTrustedSender({
+        type: 'email',
+        value: cleanEmail
+      });
+
+      // 2. Perform forced re-scan
+      const updatedAnalysis = await analysisApi.analyzeEmail(email.id, true);
+
+      // 3. Trigger callback
+      if (onTrustRefresh) {
+        onTrustRefresh({
+          ...email,
+          analysis: updatedAnalysis
+        });
+      }
+    } catch (err) {
+      console.error('Failed to trust sender:', err);
+    } finally {
+      setTrusting(false);
+    }
+  };
+
+  const handleUntrustSender = async () => {
+    setTrusting(true);
+    try {
+      const match = email.sender.match(/<([^>]+)>/);
+      const cleanEmail = match ? match[1].trim().toLowerCase() : email.sender.trim().toLowerCase();
+
+      // 1. Remove sender from trustlist
+      await trustedSenderApi.deleteTrustedSenderByValue(cleanEmail);
+
+      // 2. Perform forced re-scan
+      const updatedAnalysis = await analysisApi.analyzeEmail(email.id, true);
+
+      // 3. Trigger callback
+      if (onTrustRefresh) {
+        onTrustRefresh({
+          ...email,
+          analysis: updatedAnalysis
+        });
+      }
+    } catch (err) {
+      console.error('Failed to untrust sender:', err);
+    } finally {
+      setTrusting(false);
+    }
   };
 
   return (
@@ -29,7 +89,48 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ email, onClo
         {/* Header */}
         <div className="p-6 border-b border-slate-800 flex items-start justify-between bg-slate-900/60">
           <div className="space-y-2 pr-6">
-            <Badge variant="info">GMAIL MESSAGE INSPECTOR</Badge>
+            <div className="flex items-center gap-2 flex-wrap">
+              <Badge variant="info">GMAIL MESSAGE INSPECTOR</Badge>
+              {email.analysis?.is_trusted_sender ? (
+                <button
+                  onClick={handleUntrustSender}
+                  disabled={trusting}
+                  className="flex items-center gap-1.5 py-0.5 px-2.5 rounded bg-emerald-600 hover:bg-rose-600 text-[10px] text-white font-bold transition-all focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed uppercase font-mono group"
+                  title="Click to untrust sender"
+                >
+                  {trusting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Untrusting...
+                    </>
+                  ) : (
+                    <>
+                      <UserCheck className="w-3 h-3 group-hover:hidden" />
+                      <span className="group-hover:hidden">Trusted Sender</span>
+                      <span className="hidden group-hover:inline">Untrust Sender</span>
+                    </>
+                  )}
+                </button>
+              ) : (
+                <button
+                  onClick={handleTrustSender}
+                  disabled={trusting}
+                  className="flex items-center gap-1.5 py-0.5 px-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-[10px] text-white font-bold transition-all focus:outline-none disabled:opacity-50 disabled:cursor-not-allowed uppercase font-mono"
+                >
+                  {trusting ? (
+                    <>
+                      <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                      Trusting...
+                    </>
+                  ) : (
+                    <>
+                      <UserCheck className="w-3 h-3" />
+                      Trust Sender
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
             <h2 className="text-xl font-bold text-white leading-snug">{email.subject}</h2>
             <div className="flex flex-wrap items-center gap-y-1 gap-x-4 text-xs text-slate-400 font-mono">
               <span className="flex items-center gap-1">
@@ -88,8 +189,8 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ email, onClo
                   <div key={i} className="p-2.5 rounded bg-slate-950/60 border border-slate-800 flex items-center space-x-3">
                     <FileText className="w-4 h-4 text-blue-400 shrink-0" />
                     <div className="min-w-0">
-                      <p className="font-semibold text-slate-200 truncate">{att.filename}</p>
-                      <p className="text-[10px] text-slate-500">{att.mime_type} • {formatFileSize(att.size)}</p>
+                       <p className="font-semibold text-slate-200 truncate">{att.filename}</p>
+                       <p className="text-[10px] text-slate-500">{att.mime_type} • {formatFileSize(att.size)}</p>
                     </div>
                   </div>
                 ))}

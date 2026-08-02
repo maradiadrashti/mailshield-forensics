@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Shield, LogOut, ChevronDown, CheckCircle2, LayoutDashboard, Mail, Scan } from 'lucide-react';
+import { Shield, LogOut, ChevronDown, CheckCircle2, LayoutDashboard, Mail, UserCheck } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Badge } from '../ui/Badge';
 
 interface NavbarProps {
-  currentTab?: 'dashboard' | 'inbox';
-  onTabChange?: (tab: 'dashboard' | 'inbox') => void;
+  currentTab?: 'dashboard' | 'inbox' | 'trusted';
+  onTabChange?: (tab: 'dashboard' | 'inbox' | 'trusted') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTab = 'dashboard', onTabChange }) => {
@@ -72,6 +72,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab = 'dashboard', onTabC
               >
                 <Mail className="w-3.5 h-3.5" />
                 <span>Gmail Inbox</span>
+              </button>
+
+              <button
+                onClick={() => onTabChange?.('trusted')}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                  currentTab === 'trusted'
+                    ? 'bg-blue-600 text-white font-semibold shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <UserCheck className="w-3.5 h-3.5" />
+                <span>Trusted Senders</span>
               </button>
             </nav>
           )}

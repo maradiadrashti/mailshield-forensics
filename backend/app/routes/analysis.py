@@ -17,10 +17,11 @@ router = APIRouter(prefix="/analysis", tags=["AI Threat Analysis"])
 )
 async def analyze_email(
     email_id: str,
+    force: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    return AIController.analyze_email(db, current_user, email_id)
+    return AIController.analyze_email(db, current_user, email_id, force=force)
 
 
 @router.get(

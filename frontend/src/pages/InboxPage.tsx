@@ -114,6 +114,17 @@ export const InboxPage: React.FC = () => {
     }
   };
 
+  const handleTrustRefresh = async (updatedEmail: EmailMessage) => {
+    await fetchEmailsAndAnalysis();
+    if (selectedEmail && selectedEmail.id === updatedEmail.id) {
+      setSelectedEmail(updatedEmail);
+    }
+    if (selectedAiEmail && selectedAiEmail.id === updatedEmail.id) {
+      setSelectedAiEmail(updatedEmail);
+      setSelectedAnalysis(updatedEmail.analysis || null);
+    }
+  };
+
   return (
     <div className="space-y-6">
       {/* Top Banner & Control Bar */}
@@ -261,6 +272,7 @@ export const InboxPage: React.FC = () => {
       <EmailDetailModal
         email={selectedEmail}
         onClose={() => setSelectedEmail(null)}
+        onTrustRefresh={handleTrustRefresh}
       />
 
       {/* Single Email Explainable AI Inspector Modal */}
@@ -271,6 +283,7 @@ export const InboxPage: React.FC = () => {
           setSelectedAiEmail(null);
           setSelectedAnalysis(null);
         }}
+        onTrustRefresh={handleTrustRefresh}
       />
 
       {/* Sync Success Modal */}

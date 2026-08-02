@@ -8,11 +8,12 @@ import { InboxPage } from './pages/InboxPage';
 import { LoginPage } from './pages/LoginPage';
 import { AuthCallbackPage } from './pages/AuthCallbackPage';
 import { NotFoundPage } from './pages/NotFoundPage';
+import { TrustedSendersPage } from './pages/TrustedSendersPage';
 import { ProtectedRoute } from './components/auth/ProtectedRoute';
 
 export function App() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname);
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'inbox'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'inbox' | 'trusted'>('dashboard');
 
   useEffect(() => {
     const handlePopState = () => setCurrentPath(window.location.pathname);
@@ -36,8 +37,10 @@ export function App() {
         <MainLayout currentTab={activeTab} onTabChange={setActiveTab}>
           {activeTab === 'dashboard' ? (
             <DashboardPage />
-          ) : (
+          ) : activeTab === 'inbox' ? (
             <InboxPage />
+          ) : (
+            <TrustedSendersPage />
           )}
         </MainLayout>
       </ProtectedRoute>

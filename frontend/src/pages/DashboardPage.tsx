@@ -86,6 +86,14 @@ export const DashboardPage: React.FC = () => {
     }
   };
 
+  const handleTrustRefresh = async (updatedEmail: EmailMessage) => {
+    await fetchStats();
+    if (selectedThreat && selectedThreat.id === updatedEmail.id) {
+      setSelectedThreat(updatedEmail);
+      setSelectedAnalysis(updatedEmail.analysis || null);
+    }
+  };
+
   if (loading) {
     return (
       <div className="py-20 flex flex-col items-center justify-center space-y-4 text-slate-400">
@@ -228,6 +236,7 @@ export const DashboardPage: React.FC = () => {
           setSelectedThreat(null);
           setSelectedAnalysis(null);
         }}
+        onTrustRefresh={handleTrustRefresh}
       />
 
       {/* Sync Success Modal */}

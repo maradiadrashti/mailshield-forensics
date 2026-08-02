@@ -29,3 +29,6 @@ class User(Base):
     oauth_tokens: Mapped[list["OAuthToken"]] = relationship(
         "OAuthToken", back_populates="user", cascade="all, delete-orphan"
     )
+    trusted_senders: Mapped[list["TrustedSender"]] = relationship(
+        "TrustedSender", back_populates="user", cascade="all, delete-orphan"
+    )

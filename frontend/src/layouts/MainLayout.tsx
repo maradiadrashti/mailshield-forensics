@@ -3,8 +3,8 @@ import { Navbar } from '../components/layout/Navbar';
 
 interface MainLayoutProps {
   children: React.ReactNode;
-  currentTab?: 'dashboard' | 'inbox';
-  onTabChange?: (tab: 'dashboard' | 'inbox') => void;
+  currentTab?: 'dashboard' | 'inbox' | 'trusted';
+  onTabChange?: (tab: 'dashboard' | 'inbox' | 'trusted') => void;
 }
 
 export const MainLayout: React.FC<MainLayoutProps> = ({ children, currentTab, onTabChange }) => {

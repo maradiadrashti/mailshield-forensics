@@ -6,8 +6,8 @@ from app.services.ai_service import AIService
 
 class AIController:
     @staticmethod
-    def analyze_email(db: Session, user: User, email_id: str) -> AnalysisResultResponse:
-        result = AIService.analyze_email_by_id(db, user, email_id)
+    def analyze_email(db: Session, user: User, email_id: str, force: bool = False) -> AnalysisResultResponse:
+        result = AIService.analyze_email_by_id(db, user, email_id, force=force)
         return AnalysisResultResponse.model_validate(result)
 
     @staticmethod
