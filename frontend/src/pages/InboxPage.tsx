@@ -11,6 +11,31 @@ import { EmptyState } from '../components/inbox/EmptyState';
 import { Button } from '../components/ui/Button';
 import { Badge } from '../components/ui/Badge';
 
+const formatSyncLabel = (syncedAt: number | null, now: number) => {
+  if (!syncedAt) {
+    return 'Sync Gmail';
+  }
+
+  const elapsedMinutes = Math.floor((now - syncedAt) / 60000);
+
+  if (elapsedMinutes < 1) {
+    return 'Synced just now';
+  }
+
+  if (elapsedMinutes < 60) {
+    return `Synced ${elapsedMinutes} min${elapsedMinutes === 1 ? '' : 's'} ago`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+
+  if (elapsedHours < 24) {
+    return `Synced ${elapsedHours} hour${elapsedHours === 1 ? '' : 's'} ago`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `Synced ${elapsedDays} day${elapsedDays === 1 ? '' : 's'} ago`;
+};
+
 export const InboxPage: React.FC = () => {
   const [emails, setEmails] = useState<EmailMessage[]>([]);
   const [total, setTotal] = useState<number>(0);
@@ -21,6 +46,8 @@ export const InboxPage: React.FC = () => {
   const [syncing, setSyncing] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [now, setNow] = useState<number>(Date.now());
   
   const [selectedEmail, setSelectedEmail] = useState<EmailMessage | null>(null);
   const [selectedAiEmail, setSelectedAiEmail] = useState<EmailMessage | null>(null);
@@ -61,7 +88,36 @@ export const InboxPage: React.FC = () => {
 
   useEffect(() => {
     fetchEmailsAndAnalysis();
-  }, [fetchEmailsAndAnalysis]);
+
+    const interval = setInterval(async () => {
+      try {
+        await gmailApi.syncMessages(10);
+        // Silently load new messages and analysis to avoid screen flashing or loader overlays
+        const data = await gmailApi.getMessages(page, 20, search);
+        const batchRes = await analysisApi.batchAnalyze();
+        const analysisMap = new Map<string, AnalysisResult>();
+        batchRes.results.forEach((r) => analysisMap.set(r.email_id, r));
+
+        const mergedItems = data.items.map((item) => ({
+          ...item,
+          analysis: analysisMap.get(item.id),
+        }));
+
+        setEmails(mergedItems);
+        setTotal(data.total);
+        setPages(data.pages);
+      } catch (err) {
+        console.error('Background real-time sync failed:', err);
+      }
+    }, 10000);
+
+    return () => clearInterval(interval);
+  }, [fetchEmailsAndAnalysis, page, search]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(timer);
+  }, []);
 
   const handleSync = async () => {
     setSyncing(true);
@@ -70,6 +126,7 @@ export const InboxPage: React.FC = () => {
       const res = await gmailApi.syncMessages(20);
       setSyncResult(res);
       setShowSyncModal(true);
+      setLastSyncedAt(Date.now());
       setPage(1);
       await fetchEmailsAndAnalysis();
     } catch (err: any) {
@@ -135,9 +192,6 @@ export const InboxPage: React.FC = () => {
             <h2 className="text-xl font-bold text-white">MailShield AI Threat Dashboard</h2>
             <Badge variant="info">{total} Messages</Badge>
           </div>
-          <p className="text-xs text-slate-400">
-            Real-time Gmail API sync with HuggingFace NLP threat classification & Explainable AI output.
-          </p>
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
@@ -160,7 +214,7 @@ export const InboxPage: React.FC = () => {
             className="text-xs font-mono"
           >
             <RefreshCw className="w-4 h-4 mr-2" />
-            Sync Gmail (20 Messages)
+              {formatSyncLabel(lastSyncedAt, now)}
           </Button>
         </div>
       </div>

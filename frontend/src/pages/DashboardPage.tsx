@@ -13,12 +13,39 @@ import { ExplainableAiModal } from '../components/analysis/ExplainableAiModal';
 import { Card } from '../components/ui/Card';
 import { Button } from '../components/ui/Button';
 
+const formatSyncLabel = (syncedAt: number | null, now: number) => {
+  if (!syncedAt) {
+    return 'Sync Gmail';
+  }
+
+  const elapsedMinutes = Math.floor((now - syncedAt) / 60000);
+
+  if (elapsedMinutes < 1) {
+    return 'Synced just now';
+  }
+
+  if (elapsedMinutes < 60) {
+    return `Synced ${elapsedMinutes} min${elapsedMinutes === 1 ? '' : 's'} ago`;
+  }
+
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+
+  if (elapsedHours < 24) {
+    return `Synced ${elapsedHours} hour${elapsedHours === 1 ? '' : 's'} ago`;
+  }
+
+  const elapsedDays = Math.floor(elapsedHours / 24);
+  return `Synced ${elapsedDays} day${elapsedDays === 1 ? '' : 's'} ago`;
+};
+
 export const DashboardPage: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState<boolean>(false);
   const [analyzing, setAnalyzing] = useState<boolean>(false);
+  const [lastSyncedAt, setLastSyncedAt] = useState<number | null>(null);
+  const [now, setNow] = useState<number>(Date.now());
   
   const [selectedThreat, setSelectedThreat] = useState<EmailMessage | null>(null);
   const [selectedAnalysis, setSelectedAnalysis] = useState<AnalysisResult | null>(null);
@@ -50,6 +77,7 @@ export const DashboardPage: React.FC = () => {
       const res = await gmailApi.syncMessages(20);
       setSyncResult(res);
       setShowSyncModal(true);
+      setLastSyncedAt(Date.now());
       await fetchStats();
     } catch (err: any) {
       console.error('Failed to sync Gmail messages:', err);
@@ -77,6 +105,11 @@ export const DashboardPage: React.FC = () => {
 
   useEffect(() => {
     fetchStats();
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 60000);
+    return () => window.clearInterval(timer);
   }, []);
 
   const handleSelectThreat = (threat: EmailMessage) => {
@@ -122,9 +155,6 @@ export const DashboardPage: React.FC = () => {
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-blue-500/20 glow-blue">
         <div className="space-y-1">
           <h2 className="text-2xl font-black text-white tracking-tight">MailShield Executive Threat Dashboard</h2>
-          <p className="text-xs text-slate-400">
-            Real-time cybersecurity metrics, HuggingFace NLP threat spectrum, and 6-vector URL diagnostics.
-          </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button
@@ -144,7 +174,7 @@ export const DashboardPage: React.FC = () => {
             isLoading={syncing}
             className="text-xs font-mono"
           >
-            <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> Sync Gmail (20 Messages)
+            <RefreshCw className="w-3.5 h-3.5 mr-1.5" /> {formatSyncLabel(lastSyncedAt, now)}
           </Button>
 
           <Button size="sm" variant="secondary" onClick={fetchStats} className="text-xs font-mono">

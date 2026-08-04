@@ -14,24 +14,16 @@ GOOGLE_USERINFO_URL = "https://www.googleapis.com/oauth2/v2/userinfo"
 
 class AuthService:
     @staticmethod
-    def get_google_auth_url() -> str:
+    def get_google_auth_url(force_consent: bool = False) -> str:
         """
         Generates production Google OAuth 2.0 Consent URL with required scopes.
         """
-        # If Google client credentials are not configured, avoid constructing
-        # a URL with an empty client_id which causes Google to return the
-        # "Missing required parameter: client_id" error. If dev demo mode is
-        # enabled, return the local demo page URL instead so users can sign in
-        # without real Google credentials.
         if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
             if settings.ENABLE_DEV_DEMO:
                 return f"{settings.BACKEND_URL}{settings.API_V1_STR}/auth/google/demo/page"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    "Google OAuth not configured: set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your backend environment. "
-                    "For local testing you can enable ENABLE_DEV_DEMO=True to use the demo sign-in page."
-                )
+                detail="Google OAuth not configured: set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your backend environment."
             )
         scopes = [
             "openid",
@@ -41,6 +33,7 @@ class AuthService:
         ]
         scope_str = "%20".join(scopes)
         
+        prompt_val = "consent" if force_consent else "select_account"
         url = (
             f"https://accounts.google.com/o/oauth2/v2/auth?"
             f"client_id={settings.GOOGLE_CLIENT_ID}&"
@@ -48,7 +41,7 @@ class AuthService:
             f"response_type=code&"
             f"scope={scope_str}&"
             f"access_type=offline&"
-            f"prompt=consent"
+            f"prompt={prompt_val}"
         )
         return url
 
@@ -59,9 +52,6 @@ class AuthService:
         fetches authenticated Google user profile, creates/updates User in database,
         stores OAuth token credentials, and issues MailShield JWT session tokens.
         """
-        google_user = None
-        google_tokens = {}
-
         # Isolate Demo Login strictly behind ENABLE_DEV_DEMO flag
         if settings.ENABLE_DEV_DEMO and code.startswith("demo_google_auth_code"):
             if "maradiadrashti" in code:
@@ -106,6 +96,7 @@ class AuthService:
                     "scope": "openid email profile https://www.googleapis.com/auth/gmail.readonly",
                     "token_type": "Bearer"
                 }
+            access_token = google_tokens.get("access_token")
         else:
             # Production Real Google OAuth 2.0 Exchange
             token_payload = {
@@ -139,6 +130,7 @@ class AuthService:
                     detail="No access token returned from Google OAuth exchange."
                 )
 
+        if not google_user:
             # Fetch authenticated User Profile from Google API
             userinfo_res = requests.get(
                 GOOGLE_USERINFO_URL,
@@ -237,23 +229,47 @@ class AuthService:
 
         if token_exp and (token_exp - timedelta(minutes=5)) <= now_utc:
             # Attempt automatic refresh if refresh_token is present
-            if token_record.refresh_token and not token_record.refresh_token.startswith("demo_"):
-                try:
-                    refresh_payload = {
-                        "client_id": settings.GOOGLE_CLIENT_ID,
-                        "client_secret": settings.GOOGLE_CLIENT_SECRET,
-                        "refresh_token": token_record.refresh_token,
-                        "grant_type": "refresh_token"
-                    }
-                    res = requests.post(GOOGLE_TOKEN_URL, data=refresh_payload, timeout=10)
-                    if res.status_code == 200:
-                        new_data = res.json()
-                        token_record.access_token = new_data.get("access_token", token_record.access_token)
-                        new_expires_in = new_data.get("expires_in", 3600)
-                        token_record.expires_at = now_utc + timedelta(seconds=new_expires_in)
+            if not token_record.refresh_token:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Google refresh token not found. Please sign in again."
+                )
+            
+            try:
+                refresh_payload = {
+                    "client_id": settings.GOOGLE_CLIENT_ID,
+                    "client_secret": settings.GOOGLE_CLIENT_SECRET,
+                    "refresh_token": token_record.refresh_token,
+                    "grant_type": "refresh_token"
+                }
+                res = requests.post(GOOGLE_TOKEN_URL, data=refresh_payload, timeout=10)
+                if res.status_code == 200:
+                    new_data = res.json()
+                    token_record.access_token = new_data.get("access_token", token_record.access_token)
+                    new_expires_in = new_data.get("expires_in", 3600)
+                    token_record.expires_at = now_utc + timedelta(seconds=new_expires_in)
+                    db.commit()
+                else:
+                    err_json = {}
+                    try:
+                        err_json = res.json()
+                    except Exception:
+                        pass
+                    err_msg = err_json.get("error", "")
+                    if res.status_code in (400, 401) or err_msg == "invalid_grant":
+                        # Clear invalid tokens from database
+                        db.delete(token_record)
                         db.commit()
-                except Exception as e:
-                    print(f"Failed to refresh Google Access Token automatically: {e}")
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="Google account authorization has been revoked or expired. Please sign in with Google again."
+                        )
+                    else:
+                        print(f"Failed to refresh Google Access Token: {res.status_code} {res.text}")
+            except HTTPException:
+                raise
+            except Exception as e:
+                print(f"Failed to refresh Google Access Token automatically: {e}")
 
         return token_record.access_token
 

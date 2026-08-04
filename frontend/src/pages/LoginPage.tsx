@@ -1,22 +1,36 @@
-import React from 'react';
-import { Shield, Lock, Cpu, Eye, CheckCircle2, ArrowRight } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Shield, Lock, Cpu, Eye, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
 import { Button } from '../components/ui/Button';
 
 export const LoginPage: React.FC = () => {
-  const { loginWithGoogle, isAuthenticated } = useAuth();
+  const { loginWithGoogle, handleAuthCallback, isAuthenticated } = useAuth();
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const showDevDemo = import.meta.env.VITE_ENABLE_DEV_DEMO !== 'false';
+
+  const handleDemoLogin = async () => {
+    try {
+      await handleAuthCallback("demo_google_auth_code");
+      window.location.href = '/';
+    } catch (err) {
+      console.error('Demo login failed:', err);
+    }
+  };
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const err = params.get('error');
+    if (err) {
+      setErrorMsg(err);
+    }
+  }, []);
 
   if (isAuthenticated) {
     window.location.href = '/';
     return null;
   }
-
-  const handleDemoLogin = () => {
-    window.location.href = '/auth/callback?code=demo_google_auth_code';
-  };
 
   return (
     <div className="min-h-screen bg-shield-bg text-slate-100 flex flex-col justify-center items-center px-4 relative overflow-hidden py-12">
@@ -47,6 +61,12 @@ export const LoginPage: React.FC = () => {
               Connect your Gmail account securely to scan inboxes for threats, scams, and misinformation.
             </p>
           </div>
+
+          {errorMsg && (
+            <div className="p-3.5 bg-red-950/40 border border-red-500/35 rounded-xl text-xs text-red-300 text-center animate-fade-in font-medium">
+              {errorMsg}
+            </div>
+          )}
 
           <div className="space-y-4 pt-2">
             {/* Google OAuth Login Button */}
@@ -95,17 +115,6 @@ export const LoginPage: React.FC = () => {
                 </Button>
               </>
             )}
-          </div>
-
-          <div className="pt-4 border-t border-slate-800/80 text-[11px] text-slate-400 space-y-2">
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>Read-only Gmail API scope (`gmail.readonly`)</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-              <span>MailShield JWT Access & Refresh Token rotation</span>
-            </div>
           </div>
         </Card>
 

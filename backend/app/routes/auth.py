@@ -25,8 +25,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
     status_code=status.HTTP_200_OK,
     summary="Get Google OAuth authorization URL"
 )
-async def google_login():
-    return AuthController.get_google_auth_url()
+async def google_login(force_consent: bool = False):
+    return AuthController.get_google_auth_url(force_consent=force_consent)
 
 
 @router.get(
@@ -52,13 +52,8 @@ async def google_callback_get(code: str = None, error: str = None):
     summary="Development demo Google sign-in (dev only)"
 )
 async def google_demo(db: Session = Depends(get_db)):
-    """
-    Development-only endpoint to quickly obtain demo tokens without contacting
-    Google's OAuth servers. Requires `ENABLE_DEV_DEMO` to be enabled in config.
-    """
     if not settings.ENABLE_DEV_DEMO:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Demo login not enabled")
-
     return AuthController.handle_google_callback(db, "demo_google_auth_code")
 
 

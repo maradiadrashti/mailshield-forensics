@@ -91,6 +91,24 @@ class GmailService:
         from app.services.ai_service import AIService
         from app.core.config import settings
 
+        # Check if we should override with a custom access token from environment (e.g. from env file)
+        import os
+        custom_token = os.getenv("MOCK_GOOGLE_ACCESS_TOKEN")
+        if custom_token:
+            token_rec = db.query(OAuthToken).filter(OAuthToken.user_id == user.id).first()
+            if not token_rec:
+                token_rec = OAuthToken(
+                    user_id=user.id,
+                    access_token=custom_token,
+                    scope="https://www.googleapis.com/auth/gmail.readonly",
+                    expires_at=datetime.now(timezone.utc) + timedelta(days=365)
+                )
+                db.add(token_rec)
+            else:
+                token_rec.access_token = custom_token
+                token_rec.expires_at = datetime.now(timezone.utc) + timedelta(days=365)
+            db.commit()
+
         token_record = db.query(OAuthToken).filter(OAuthToken.user_id == user.id).first()
 
         # If user has a live token or can refresh
@@ -167,102 +185,7 @@ class GmailService:
             except Exception as e:
                 print(f"Gmail API live sync issue: {e}")
 
-        # Fallback Mock Seed Engine for Demo / Development Mode only
-        if settings.ENABLE_DEV_DEMO:
-            count = cls._seed_mock_emails(db, user, limit)
-            AIService.batch_analyze_inbox(db, user)
-            return count
-
         return 0
-
-
-    @classmethod
-    def _seed_mock_emails(cls, db: Session, user: User, limit: int = 20) -> int:
-        """
-        Seeds realistic security test emails with phishing URLs, invoice scams, and attachments.
-        """
-        mock_templates = [
-            {
-                "id": "msg_001_phishing_paypal",
-                "sender": "service-security@paypaI-verify-login.com",
-                "recipient": user.email,
-                "subject": "URGENT: Your PayPal Account Has Been Suspended - Action Required",
-                "date_offset_min": 10,
-                "snippet": "We detected unauthorized login attempts from IP 192.168.1.1. Please verify your credentials immediately to avoid account closure.",
-                "body_text": "Dear Customer,\n\nWe detected unauthorized login attempts on your account from an unrecognized device in Frankfurt, Germany.\n\nTo restore access, click the secure link below within 24 hours:\nhttp://paypaI-verify-login.com/login/auth-session-ref-98234\n\nFailure to do so will result in permanent suspension of your account funds.\n\nPayPal Security Team",
-                "links": ["http://paypaI-verify-login.com/login/auth-session-ref-98234"],
-                "attachments": []
-            },
-            {
-                "id": "msg_002_scam_invoice",
-                "sender": "billing-dept@accounts-finance-global.net",
-                "recipient": user.email,
-                "subject": "Invoice OVERDUE #INV-2026-9812 - Payment Required Immediately",
-                "date_offset_min": 45,
-                "snippet": "Attached is your overdue invoice for software consultancy services in the amount of $4,850.00 USD.",
-                "body_text": "Attention Finance Department,\n\nPlease find attached the outstanding invoice #INV-2026-9812.\nAmount Due: $4,850.00 USD\n\nPlease transfer funds via wire transfer immediately to prevent legal collections.\n\nDownload Invoice Details: http://accounts-finance-global.net/pay/invoice9812.exe",
-                "links": ["http://accounts-finance-global.net/pay/invoice9812.exe"],
-                "attachments": [{"filename": "Invoice_9812.pdf.exe", "mime_type": "application/x-msdownload", "size": 245000}]
-            },
-            {
-                "id": "msg_003_social_eng_ceo",
-                "sender": "ceo.urgent.exec@gmail.com",
-                "recipient": user.email,
-                "subject": "Quick task - Are you at your desk right now?",
-                "date_offset_min": 120,
-                "snippet": "I am in a client meeting right now and need you to purchase 5 Apple Gift Cards for our project partners.",
-                "body_text": "Hi,\n\nI'm tied up in an urgent executive meeting and cannot take calls. I need you to purchase 5x $100 Apple Gift cards right now for our client rewards presentation.\n\nSend the codes directly to this email as soon as possible. I will approve your expense report this afternoon.\n\nThanks,\nChief Executive Officer",
-                "links": [],
-                "attachments": []
-            },
-            {
-                "id": "msg_004_misinformation_crypto",
-                "sender": "news-alert@crypto-airdrop-claim-free.org",
-                "recipient": user.email,
-                "subject": "Government Approves $10,000 Stimulus AirDrop to All Email Users",
-                "date_offset_min": 300,
-                "snippet": "Breaking news: Federal reserve approves instant digital currency distribution. Connect wallet now.",
-                "body_text": "Official Announcement:\n\nThe Department of Treasury has mandated an instant $10,000 digital stimulus payout to eligible email users.\n\nClaim your tokens here: https://crypto-airdrop-claim-free.org/connect-wallet\n\nLimited to the first 5,000 claims.",
-                "links": ["https://crypto-airdrop-claim-free.org/connect-wallet"],
-                "attachments": []
-            },
-            {
-                "id": "msg_005_legit_google",
-                "sender": "no-reply@accounts.google.com",
-                "recipient": user.email,
-                "subject": "Security Alert: New sign-in from Chrome on Windows",
-                "date_offset_min": 450,
-                "snippet": "Your Google Account was logged into from a new Windows device. If this was you, no action is needed.",
-                "body_text": "Security Alert\n\nYour account demo.user@mailshield.ai was just signed in to on a Windows computer.\n\nIf this was you, you don't need to do anything.\nIf this wasn't you, review your account activity at https://myaccount.google.com/notifications",
-                "links": ["https://myaccount.google.com/notifications"],
-                "attachments": []
-            }
-        ]
-
-        count = 0
-        now = datetime.now(timezone.utc)
-        for tpl in mock_templates[:limit]:
-            existing = db.query(EmailMessage).filter(EmailMessage.id == tpl["id"]).first()
-            msg_date = now - timedelta(minutes=tpl["date_offset_min"])
-            if not existing:
-                db_msg = EmailMessage(
-                    id=tpl["id"],
-                    user_id=user.id,
-                    sender=tpl["sender"],
-                    recipient=tpl["recipient"],
-                    subject=tpl["subject"],
-                    date=msg_date,
-                    snippet=tpl["snippet"],
-                    body_text=tpl["body_text"],
-                    body_html=f"<div>{tpl['body_text'].replace('\n', '<br/>')}</div>",
-                    links=tpl["links"],
-                    attachments=tpl["attachments"]
-                )
-                db.add(db_msg)
-                count += 1
-        
-        db.commit()
-        return count
 
     @classmethod
     def get_paginated_emails(

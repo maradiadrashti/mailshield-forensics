@@ -11,8 +11,8 @@ from app.models.user import User
 
 class AuthController:
     @staticmethod
-    def get_google_auth_url() -> GoogleAuthUrlResponse:
-        url = AuthService.get_google_auth_url()
+    def get_google_auth_url(force_consent: bool = False) -> GoogleAuthUrlResponse:
+        url = AuthService.get_google_auth_url(force_consent=force_consent)
         return GoogleAuthUrlResponse(url=url)
 
     @staticmethod

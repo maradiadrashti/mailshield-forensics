@@ -30,10 +30,14 @@ class GmailController:
         size: int = 20,
         search: str | None = None
     ) -> PaginatedEmailResponse:
-        # If user has no emails yet in database, run initial sync
-        total_user_emails = db.query(EmailMessage).filter(EmailMessage.user_id == user.id).count()
-        if total_user_emails == 0:
-            GmailService.sync_user_emails(db, user, limit=size)
+        # Always run sync to check for new real-time emails on page 1 load
+        if page == 1:
+            try:
+                GmailService.sync_user_emails(db, user, limit=size)
+            except HTTPException as http_err:
+                raise http_err
+            except Exception as sync_err:
+                print(f"Warning: Auto-sync on page 1 load failed: {sync_err}")
 
         items, total = GmailService.get_paginated_emails(
             db=db, user=user, page=page, size=size, search=search
