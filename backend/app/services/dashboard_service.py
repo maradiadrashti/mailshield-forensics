@@ -1,11 +1,9 @@
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import desc
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.email import EmailMessage
 from app.models.analysis_result import AnalysisResult
-from app.services.ai_service import AIService
-from app.services.gmail_service import GmailService
 from app.schemas.gmail import EmailMessageResponse
 from app.schemas.dashboard import (
     DashboardStatsResponse,
@@ -17,18 +15,30 @@ from app.schemas.dashboard import (
 class DashboardService:
     @classmethod
     def get_stats(cls, db: Session, user: User) -> DashboardStatsResponse:
-        # Ensure user has emails in database
         total_emails = db.query(EmailMessage).filter(EmailMessage.user_id == user.id).count()
-        if total_emails == 0:
-            GmailService.sync_user_emails(db, user, limit=20)
-            total_emails = db.query(EmailMessage).filter(EmailMessage.user_id == user.id).count()
 
-        # Ensure emails are analyzed
-        AIService.batch_analyze_inbox(db, user)
+        latest_analysis_times = (
+            db.query(
+                AnalysisResult.email_id.label("email_id"),
+                func.max(AnalysisResult.analyzed_at).label("latest_analyzed_at")
+            )
+            .filter(AnalysisResult.user_id == user.id)
+            .group_by(AnalysisResult.email_id)
+            .subquery()
+        )
 
-        # Retrieve all analysis results for user
-        results = db.query(AnalysisResult).filter(AnalysisResult.user_id == user.id).all()
-        
+        results = (
+            db.query(AnalysisResult)
+            .join(EmailMessage, AnalysisResult.email_id == EmailMessage.id)
+            .join(
+                latest_analysis_times,
+                (AnalysisResult.email_id == latest_analysis_times.c.email_id)
+                & (AnalysisResult.analyzed_at == latest_analysis_times.c.latest_analyzed_at)
+            )
+            .filter(AnalysisResult.user_id == user.id)
+            .all()
+        )
+
         safe_count = 0
         dangerous_count = 0
         categories = {
@@ -84,8 +94,8 @@ class DashboardService:
 
             weekly_analytics.append(WeeklyDataPoint(
                 day=day_name,
-                total=max(day_emails, 1 if i < 3 else 0),
-                threats=max(day_threats, 1 if (i == 1 or i == 4) and dangerous_count > 0 else 0)
+                total=day_emails,
+                threats=day_threats
             ))
 
         # Retrieve Recent Threats (High risk emails)
@@ -99,14 +109,6 @@ class DashboardService:
         )
 
         recent_dtos = [EmailMessageResponse.model_validate(e) for e in recent_threat_emails]
-
-        if not all_recs:
-            all_recs = [
-                "Enable Multi-Factor Authentication (MFA) on your Google account.",
-                "Verify all wire transfer and invoice requests via direct phone call.",
-                "Inspect embedded URLs for typosquatting before clicking."
-            ]
-
         return DashboardStatsResponse(
             inbox_security_score=inbox_security_score,
             total_emails=total_emails,
