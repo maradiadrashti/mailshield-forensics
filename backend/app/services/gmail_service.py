@@ -102,24 +102,29 @@ class GmailService:
 
         # Check if a custom gmail_token.txt exists in multiple possible locations
         import os
+        import re
         from pathlib import Path
         
         possible_paths = [
-            Path(settings.BASE_DIR) / "gmail_token.txt",
-            Path(settings.BASE_DIR).parent / "gmail_token.txt"
+            Path(BASE_DIR) / "gmail_token.txt",
+            Path(BASE_DIR).parent / "gmail_token.txt"
         ]
         
         custom_token = None
+        custom_refresh_token = None
         for path in possible_paths:
             if path.exists():
                 try:
                     with open(path, "r", encoding="utf-8") as f:
-                        lines = f.readlines()
-                        for line in lines:
-                            cleaned = line.strip()
-                            if cleaned and not cleaned.startswith("#"):
-                                custom_token = cleaned
-                                break
+                        content = f.read()
+                        # Extract access token (ya29. prefix)
+                        access_match = re.search(r'(ya29\.[a-zA-Z0-9_\-\.\+]+)', content)
+                        if access_match:
+                            custom_token = access_match.group(1)
+                        # Extract refresh token (1// prefix)
+                        refresh_match = re.search(r'(1//[a-zA-Z0-9_\-\.\+]+)', content)
+                        if refresh_match:
+                            custom_refresh_token = refresh_match.group(1)
                     if custom_token:
                         logger.info(f"Loaded custom Google access token from: {path}")
                         break
@@ -129,6 +134,9 @@ class GmailService:
         if custom_token:
             logger.info("Found custom gmail_token.txt. Overriding stored access token and resetting expiry.")
             token_record.access_token = custom_token
+            if custom_refresh_token:
+                logger.info("Found custom refresh token in gmail_token.txt. Updating stored refresh token.")
+                token_record.refresh_token = custom_refresh_token
             token_record.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
             db.commit()
 
