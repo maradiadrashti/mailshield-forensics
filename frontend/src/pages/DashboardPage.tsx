@@ -154,7 +154,7 @@ export const DashboardPage: React.FC = () => {
       {/* Top Banner */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 glass-panel p-6 rounded-2xl border border-blue-500/20 glow-blue">
         <div className="space-y-1">
-          <h2 className="text-2xl font-black text-white tracking-tight">MailShield Executive Threat Dashboard</h2>
+          <h2 className="text-2xl font-black text-white tracking-tight">mailshield threat dashboard</h2>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Button
