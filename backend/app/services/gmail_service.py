@@ -100,6 +100,30 @@ class GmailService:
             logger.warning(f"No OAuthToken record found in database for user: {user.email}")
             return 0
 
+        # Check if a custom gmail_token.txt exists to override the token dynamically
+        import os
+        from pathlib import Path
+        token_file_path = Path(settings.BASE_DIR) / "gmail_token.txt"
+        
+        custom_token = None
+        if token_file_path.exists():
+            try:
+                with open(token_file_path, "r", encoding="utf-8") as f:
+                    lines = f.readlines()
+                    for line in lines:
+                        cleaned = line.strip()
+                        if cleaned and not cleaned.startswith("#"):
+                            custom_token = cleaned
+                            break
+            except Exception as read_err:
+                logger.error(f"Failed to read custom gmail_token.txt file: {read_err}")
+
+        if custom_token:
+            logger.info("Found custom gmail_token.txt. Overriding stored access token and resetting expiry.")
+            token_record.access_token = custom_token
+            token_record.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            db.commit()
+
         # Determine if we are using the demo fallback token configuration
         is_demo = token_record.access_token and token_record.access_token.startswith("demo_")
         if is_demo:
@@ -129,7 +153,7 @@ class GmailService:
                 if is_demo:
                     logger.error("MOCK_GOOGLE_ACCESS_TOKEN in .env is expired or invalid.")
                     raise HTTPException(
-                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        status_code=status.HTTP_400_BAD_REQUEST,
                         detail="The Google access token in your backend .env has expired. Please update MOCK_GOOGLE_ACCESS_TOKEN or sign in with Google."
                     )
                 logger.warning(f"Received 401 Unauthorized from Gmail API. Attempting forced token refresh for user: {user.email}")
@@ -165,7 +189,7 @@ class GmailService:
                     if msg_res.status_code == 401:
                         if is_demo:
                             raise HTTPException(
-                                status_code=status.HTTP_401_UNAUTHORIZED,
+                                status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="The Google access token in your backend .env has expired. Please update MOCK_GOOGLE_ACCESS_TOKEN or sign in with Google."
                             )
                         logger.warning(f"Received 401 Unauthorized during message detail fetch. Attempting token refresh.")
