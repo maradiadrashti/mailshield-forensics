@@ -111,15 +111,18 @@ class GmailService:
             if path.exists():
                 try:
                     with open(path, "r", encoding="utf-8") as f:
-                        content = f.read()
-                        # Extract access token (ya29. prefix)
-                        access_match = re.search(r'(ya29\.[a-zA-Z0-9_\-\.\+]+)', content)
-                        if access_match:
-                            custom_token = access_match.group(1)
-                        # Extract refresh token (1// prefix)
-                        refresh_match = re.search(r'(1//[a-zA-Z0-9_\-\.\+]+)', content)
-                        if refresh_match:
-                            custom_refresh_token = refresh_match.group(1)
+                        for line in f:
+                            cleaned = line.strip()
+                            if not cleaned or cleaned.startswith("#"):
+                                continue
+                            # Extract access token (ya29. prefix)
+                            access_match = re.search(r'(ya29\.[a-zA-Z0-9_\-\.\+]+)', cleaned)
+                            if access_match:
+                                custom_token = access_match.group(1)
+                            # Extract refresh token (1// prefix)
+                            refresh_match = re.search(r'(1//[a-zA-Z0-9_\-\.\+]+)', cleaned)
+                            if refresh_match:
+                                custom_refresh_token = refresh_match.group(1)
                     if custom_token:
                         logger.info(f"Loaded custom Google access token from: {path}")
                         break
