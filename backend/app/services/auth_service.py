@@ -20,7 +20,7 @@ class AuthService:
         """
         if not settings.GOOGLE_CLIENT_ID or not settings.GOOGLE_CLIENT_SECRET:
             if settings.ENABLE_DEV_DEMO:
-                return f"{settings.BACKEND_URL}{settings.API_V1_STR}/auth/google/demo/page"
+                return f"{settings.FRONTEND_URL}/auth/callback?code=demo_google_auth_code_maradiadrashti"
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Google OAuth not configured: set GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET in your backend environment."

@@ -100,23 +100,31 @@ class GmailService:
             logger.warning(f"No OAuthToken record found in database for user: {user.email}")
             return 0
 
-        # Check if a custom gmail_token.txt exists to override the token dynamically
+        # Check if a custom gmail_token.txt exists in multiple possible locations
         import os
         from pathlib import Path
-        token_file_path = Path(settings.BASE_DIR) / "gmail_token.txt"
+        
+        possible_paths = [
+            Path(settings.BASE_DIR) / "gmail_token.txt",
+            Path(settings.BASE_DIR).parent / "gmail_token.txt"
+        ]
         
         custom_token = None
-        if token_file_path.exists():
-            try:
-                with open(token_file_path, "r", encoding="utf-8") as f:
-                    lines = f.readlines()
-                    for line in lines:
-                        cleaned = line.strip()
-                        if cleaned and not cleaned.startswith("#"):
-                            custom_token = cleaned
-                            break
-            except Exception as read_err:
-                logger.error(f"Failed to read custom gmail_token.txt file: {read_err}")
+        for path in possible_paths:
+            if path.exists():
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        lines = f.readlines()
+                        for line in lines:
+                            cleaned = line.strip()
+                            if cleaned and not cleaned.startswith("#"):
+                                custom_token = cleaned
+                                break
+                    if custom_token:
+                        logger.info(f"Loaded custom Google access token from: {path}")
+                        break
+                except Exception as read_err:
+                    logger.error(f"Failed to read custom token file at {path}: {read_err}")
 
         if custom_token:
             logger.info("Found custom gmail_token.txt. Overriding stored access token and resetting expiry.")
