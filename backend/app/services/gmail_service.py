@@ -132,6 +132,8 @@ class GmailService:
             token_record.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
             db.commit()
 
+        used_custom_token = (custom_token is not None)
+
         # Determine if we are using the demo fallback token configuration
         is_demo = token_record.access_token and token_record.access_token.startswith("demo_")
         if is_demo:
@@ -158,6 +160,11 @@ class GmailService:
 
             # 2. If token expired on Gmail side (receives 401), force refresh and retry
             if res.status_code == 401:
+                if used_custom_token:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail="google access token expired replace it to continue"
+                    )
                 if is_demo:
                     logger.error("MOCK_GOOGLE_ACCESS_TOKEN in .env is expired or invalid.")
                     raise HTTPException(
@@ -195,6 +202,11 @@ class GmailService:
                     msg_res = requests.get(detail_url, headers=headers, timeout=10)
 
                     if msg_res.status_code == 401:
+                        if used_custom_token:
+                            raise HTTPException(
+                                status_code=status.HTTP_400_BAD_REQUEST,
+                                detail="google access token expired replace it to continue"
+                            )
                         if is_demo:
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -274,6 +286,11 @@ class GmailService:
             else:
                 logger.error(f"Gmail API list messages endpoint returned error status: {res.status_code}, Response: {res.text}")
                 if res.status_code == 401:
+                    if used_custom_token:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="google access token expired replace it to continue"
+                        )
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
                         detail="Gmail API authentication failed. Please sign in again."
@@ -285,6 +302,11 @@ class GmailService:
                     )
         except HTTPException as http_exc:
             logger.error(f"Authentication failure or HTTP exception in sync_user_emails: {http_exc.detail}")
+            if used_custom_token and http_exc.status_code == 401:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="google access token expired replace it to continue"
+                )
             raise http_exc
         except Exception as e:
             logger.exception(f"Unexpected exception during Gmail live sync: {e}")
