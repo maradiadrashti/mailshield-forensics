@@ -177,13 +177,21 @@ class AuthService:
         expires_in = google_tokens.get("expires_in", 3600)
         expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
         token_record = db.query(OAuthToken).filter(OAuthToken.user_id == user.id).first()
+        
+        has_refresh = "yes" if google_tokens.get("refresh_token") else "no"
+        import logging
+        logger = logging.getLogger("mailshield.services")
+        logger.info(f"Processing Google OAuth callback. Storing tokens for user ID: {user.id}. Refresh token in response: {has_refresh}")
+
         if token_record:
+            logger.info(f"Updating existing OAuthToken record in database for user ID: {user.id}")
             token_record.access_token = google_tokens.get("access_token", token_record.access_token)
             if google_tokens.get("refresh_token"):
                 token_record.refresh_token = google_tokens.get("refresh_token")
             token_record.expires_at = expires_at
             token_record.scope = google_tokens.get("scope", token_record.scope)
         else:
+            logger.info(f"Creating new OAuthToken record in database for user ID: {user.id}")
             token_record = OAuthToken(
                 user_id=user.id,
                 access_token=google_tokens.get("access_token", ""),
@@ -194,6 +202,7 @@ class AuthService:
             db.add(token_record)
             
         db.commit()
+        logger.info(f"OAuthToken record saved successfully for user ID: {user.id}. Access token expires at: {expires_at}")
 
         # Issue MailShield JWT Tokens
         jwt_payload = {"sub": user.id, "email": user.email, "name": user.name}
@@ -209,13 +218,17 @@ class AuthService:
         )
 
     @classmethod
-    def get_valid_google_access_token(cls, db: Session, user_id: str) -> str:
+    def get_valid_google_access_token(cls, db: Session, user_id: str, force_refresh: bool = False) -> str:
         """
-        Retrieves the user's stored Google Access Token. If expired, automatically
-        refreshes it using the Google Refresh Token and updates the database.
+        Retrieves the user's stored Google Access Token. If expired or force_refresh is True,
+        automatically refreshes it using the Google Refresh Token and updates the database.
         """
+        import logging
+        logger = logging.getLogger("mailshield.services")
+
         token_record = db.query(OAuthToken).filter(OAuthToken.user_id == user_id).first()
         if not token_record or not token_record.access_token:
+            logger.error(f"Google OAuth credentials not found in database for user ID: {user_id}")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Google OAuth credentials not found for user. Please sign in again."
@@ -227,12 +240,20 @@ class AuthService:
         if token_exp and token_exp.tzinfo is None:
             token_exp = token_exp.replace(tzinfo=timezone.utc)
 
-        if token_exp and (token_exp - timedelta(minutes=5)) <= now_utc:
+        is_expired = token_exp and (token_exp - timedelta(minutes=5)) <= now_utc
+
+        if force_refresh or is_expired:
+            reason = "forced manual refresh" if force_refresh else f"token expired/nearing expiration (expires_at={token_exp}, now={now_utc})"
+            logger.info(f"Initiating Google token refresh for user ID {user_id} due to {reason}.")
+            
             # Attempt automatic refresh if refresh_token is present
             if not token_record.refresh_token:
+                logger.error(f"Google refresh token not found for user ID {user_id}. Deleting invalid token record.")
+                db.delete(token_record)
+                db.commit()
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Google refresh token not found. Please sign in again."
+                    detail="Google refresh token not found. Please sign in with Google again."
                 )
             
             try:
@@ -242,13 +263,24 @@ class AuthService:
                     "refresh_token": token_record.refresh_token,
                     "grant_type": "refresh_token"
                 }
+                logger.info(f"Sending POST request to Google token refresh URL: {GOOGLE_TOKEN_URL}")
                 res = requests.post(GOOGLE_TOKEN_URL, data=refresh_payload, timeout=10)
+                logger.info(f"Google Token URL response status: {res.status_code}")
+                
                 if res.status_code == 200:
                     new_data = res.json()
-                    token_record.access_token = new_data.get("access_token", token_record.access_token)
+                    new_access_token = new_data.get("access_token")
+                    if not new_access_token:
+                        logger.error("Token refresh response did not contain 'access_token'.")
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail="OAuth refresh failed: Google response did not include a new access token."
+                        )
+                    token_record.access_token = new_access_token
                     new_expires_in = new_data.get("expires_in", 3600)
                     token_record.expires_at = now_utc + timedelta(seconds=new_expires_in)
                     db.commit()
+                    logger.info(f"Google Access Token refreshed successfully for user ID {user_id}. New expiry: {token_record.expires_at}")
                 else:
                     err_json = {}
                     try:
@@ -256,20 +288,31 @@ class AuthService:
                     except Exception:
                         pass
                     err_msg = err_json.get("error", "")
+                    err_desc = err_json.get("error_description", "")
+                    logger.error(f"Failed to refresh Google Access Token: Status={res.status_code}, Error={err_msg}, Description={err_desc}")
+                    
                     if res.status_code in (400, 401) or err_msg == "invalid_grant":
                         # Clear invalid tokens from database
                         db.delete(token_record)
                         db.commit()
+                        logger.warning(f"Deleted invalid OAuth credentials for user ID {user_id} due to invalid grant error.")
                         raise HTTPException(
                             status_code=status.HTTP_401_UNAUTHORIZED,
                             detail="Google account authorization has been revoked or expired. Please sign in with Google again."
                         )
                     else:
-                        print(f"Failed to refresh Google Access Token: {res.status_code} {res.text}")
+                        raise HTTPException(
+                            status_code=status.HTTP_401_UNAUTHORIZED,
+                            detail=f"Google token refresh failed: {err_msg} ({err_desc})"
+                        )
             except HTTPException:
                 raise
             except Exception as e:
-                print(f"Failed to refresh Google Access Token automatically: {e}")
+                logger.exception(f"Failed to refresh Google Access Token automatically: {e}")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail=f"Failed to refresh Google access token: {str(e)}"
+                )
 
         return token_record.access_token
 

@@ -90,100 +90,176 @@ class GmailService:
         from app.services.auth_service import AuthService
         from app.services.ai_service import AIService
         from app.core.config import settings
+        import logging
 
-        # Check if we should override with a custom access token from environment (e.g. from env file)
-        import os
-        custom_token = os.getenv("MOCK_GOOGLE_ACCESS_TOKEN")
-        if custom_token:
-            token_rec = db.query(OAuthToken).filter(OAuthToken.user_id == user.id).first()
-            if not token_rec:
-                token_rec = OAuthToken(
-                    user_id=user.id,
-                    access_token=custom_token,
-                    scope="https://www.googleapis.com/auth/gmail.readonly",
-                    expires_at=datetime.now(timezone.utc) + timedelta(days=365)
-                )
-                db.add(token_rec)
-            else:
-                token_rec.access_token = custom_token
-                token_rec.expires_at = datetime.now(timezone.utc) + timedelta(days=365)
-            db.commit()
+        logger = logging.getLogger("mailshield.services")
 
         token_record = db.query(OAuthToken).filter(OAuthToken.user_id == user.id).first()
 
-        # If user has a live token or can refresh
-        if token_record and token_record.access_token and not token_record.access_token.startswith("demo_"):
-            try:
-                access_token = AuthService.get_valid_google_access_token(db, user.id)
-                headers = {"Authorization": f"Bearer {access_token}"}
-                params = {"maxResults": min(limit, 50)}
-                res = requests.get(GMAIL_MESSAGES_URL, headers=headers, params=params, timeout=12)
+        if not token_record:
+            logger.warning(f"No OAuthToken record found in database for user: {user.email}")
+            return 0
+
+        # Determine if we are using the demo fallback token configuration
+        is_demo = token_record.access_token and token_record.access_token.startswith("demo_")
+        if is_demo:
+            if settings.MOCK_GOOGLE_ACCESS_TOKEN:
+                logger.info(f"Demo user with mock token configuration detected: {user.email}. Using MOCK_GOOGLE_ACCESS_TOKEN from environment for live sync.")
+                access_token = settings.MOCK_GOOGLE_ACCESS_TOKEN
+            else:
+                logger.info(f"Demo user detected: {user.email}. Skipping live Gmail API sync.")
+                return 0
+        else:
+            logger.info(f"Starting Gmail synchronization for user: {user.email} (limit: {limit})")
+
+        try:
+            # 1. Fetch access token (handles expiry check internally for real accounts)
+            if not is_demo:
+                access_token = AuthService.get_valid_google_access_token(db, user.id, force_refresh=False)
                 
-                if res.status_code == 200:
-                    messages_data = res.json().get("messages", [])
-                    count = 0
-                    new_email_ids = []
-                    for msg_ref in messages_data[:limit]:
-                        msg_id = msg_ref["id"]
-                        
-                        # Pre-check database to avoid redundant Google API detail calls
-                        db_email = db.query(EmailMessage).filter(EmailMessage.id == msg_id).first()
-                        if db_email:
-                            continue
+            headers = {"Authorization": f"Bearer {access_token}"}
+            params = {"maxResults": min(limit, 50)}
 
-                        detail_url = f"{GMAIL_MESSAGES_URL}/{msg_id}?format=full"
-                        msg_res = requests.get(detail_url, headers=headers, timeout=10)
-                        if msg_res.status_code == 200:
-                            raw_msg = msg_res.json()
-                            payload = raw_msg.get("payload", {})
-                            headers_list = payload.get("headers", [])
-                            
-                            header_map = {h["name"].lower(): h["value"] for h in headers_list}
-                            sender = header_map.get("from", "Unknown Sender")
-                            recipient = header_map.get("to", user.email)
-                            subject = header_map.get("subject", "(No Subject)")
-                            date_str = header_map.get("date")
-                            
-                            try:
-                                msg_date = parsedate_to_datetime(date_str) if date_str else datetime.now(timezone.utc)
-                            except Exception:
-                                msg_date = datetime.now(timezone.utc)
- 
-                            body_text, body_html, attachments = cls._parse_mime_parts(payload)
-                            full_text = f"{subject}\n{body_text}\n{body_html}"
-                            extracted_links = cls._extract_links(full_text)
- 
-                            db_email = EmailMessage(
-                                id=msg_id,
-                                user_id=user.id,
-                                thread_id=raw_msg.get("threadId"),
-                                sender=sender,
-                                recipient=recipient,
-                                subject=subject,
-                                date=msg_date,
-                                snippet=raw_msg.get("snippet", body_text[:150]),
-                                body_text=body_text,
-                                body_html=body_html,
-                                links=extracted_links,
-                                attachments=attachments
+            logger.info(f"Sending GET request to Gmail API messages list endpoint: {GMAIL_MESSAGES_URL}")
+            res = requests.get(GMAIL_MESSAGES_URL, headers=headers, params=params, timeout=12)
+            logger.info(f"Gmail API list response status: {res.status_code}")
+
+            # 2. If token expired on Gmail side (receives 401), force refresh and retry
+            if res.status_code == 401:
+                if is_demo:
+                    logger.error("MOCK_GOOGLE_ACCESS_TOKEN in .env is expired or invalid.")
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="The Google access token in your backend .env has expired. Please update MOCK_GOOGLE_ACCESS_TOKEN or sign in with Google."
+                    )
+                logger.warning(f"Received 401 Unauthorized from Gmail API. Attempting forced token refresh for user: {user.email}")
+                access_token = AuthService.get_valid_google_access_token(db, user.id, force_refresh=True)
+                headers = {"Authorization": f"Bearer {access_token}"}
+                
+                logger.info(f"Retrying GET request to Gmail API messages list endpoint: {GMAIL_MESSAGES_URL}")
+                res = requests.get(GMAIL_MESSAGES_URL, headers=headers, params=params, timeout=12)
+                logger.info(f"Gmail API list retry response status: {res.status_code}")
+
+            if res.status_code == 200:
+                messages_data = res.json().get("messages", [])
+                total_messages = len(messages_data)
+                logger.info(f"Successfully retrieved list of {total_messages} messages from Gmail.")
+
+                count = 0
+                new_email_ids = []
+                skipped_duplicates = 0
+
+                for msg_ref in messages_data[:limit]:
+                    msg_id = msg_ref["id"]
+                    
+                    # Pre-check database to avoid redundant Google API detail calls
+                    db_email = db.query(EmailMessage).filter(EmailMessage.id == msg_id).first()
+                    if db_email:
+                        skipped_duplicates += 1
+                        continue
+
+                    detail_url = f"{GMAIL_MESSAGES_URL}/{msg_id}?format=full"
+                    logger.info(f"Fetching details for Gmail message ID: {msg_id}")
+                    msg_res = requests.get(detail_url, headers=headers, timeout=10)
+
+                    if msg_res.status_code == 401:
+                        if is_demo:
+                            raise HTTPException(
+                                status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="The Google access token in your backend .env has expired. Please update MOCK_GOOGLE_ACCESS_TOKEN or sign in with Google."
                             )
-                            db.add(db_email)
-                            count += 1
-                            new_email_ids.append(msg_id)
+                        logger.warning(f"Received 401 Unauthorized during message detail fetch. Attempting token refresh.")
+                        access_token = AuthService.get_valid_google_access_token(db, user.id, force_refresh=True)
+                        headers = {"Authorization": f"Bearer {access_token}"}
+                        
+                        logger.info(f"Retrying details fetch for Gmail message ID: {msg_id}")
+                        msg_res = requests.get(detail_url, headers=headers, timeout=10)
 
-                    db.commit()
+                    logger.info(f"Gmail message detail response status for {msg_id}: {msg_res.status_code}")
 
-                    # Trigger automatic AI threat classification pipeline ONLY for newly synced emails
-                    for new_id in new_email_ids:
+                    if msg_res.status_code == 200:
+                        raw_msg = msg_res.json()
+                        payload = raw_msg.get("payload", {})
+                        headers_list = payload.get("headers", [])
+                        
+                        header_map = {h["name"].lower(): h["value"] for h in headers_list}
+                        sender = header_map.get("from", "Unknown Sender")
+                        recipient = header_map.get("to", user.email)
+                        subject = header_map.get("subject", "(No Subject)")
+                        date_str = header_map.get("date")
+                        
                         try:
-                            AIService.analyze_email_by_id(db, user, new_id)
-                        except Exception as analysis_err:
-                            print(f"Skipping sync-time analysis for email {new_id} due to warning: {analysis_err}")
-                    return count
+                            msg_date = parsedate_to_datetime(date_str) if date_str else datetime.now(timezone.utc)
+                        except Exception:
+                            msg_date = datetime.now(timezone.utc)
+
+                        body_text, body_html, attachments = cls._parse_mime_parts(payload)
+                        full_text = f"{subject}\n{body_text}\n{body_html}"
+                        extracted_links = cls._extract_links(full_text)
+
+                        db_email = EmailMessage(
+                            id=msg_id,
+                            user_id=user.id,
+                            thread_id=raw_msg.get("threadId"),
+                            sender=sender,
+                            recipient=recipient,
+                            subject=subject,
+                            date=msg_date,
+                            snippet=raw_msg.get("snippet", body_text[:150]),
+                            body_text=body_text,
+                            body_html=body_html,
+                            links=extracted_links,
+                            attachments=attachments
+                        )
+                        db.add(db_email)
+                        count += 1
+                        new_email_ids.append(msg_id)
+                        logger.info(f"Successfully processed and staged email ID: {msg_id}")
+                    else:
+                        logger.error(f"Failed to fetch Gmail message details for ID: {msg_id}. Status: {msg_res.status_code}, Response: {msg_res.text}")
+                        if msg_res.status_code == 401:
+                            raise HTTPException(
+                                status_code=status.HTTP_401_UNAUTHORIZED,
+                                detail="Gmail API authentication failed during detail retrieval retry."
+                            )
+
+                if count > 0:
+                    db.commit()
+                    logger.info(f"Successfully committed {count} new email(s) to the database.")
                 else:
-                    print(f"Gmail API response error ({res.status_code}): {res.text}")
-            except Exception as e:
-                print(f"Gmail API live sync issue: {e}")
+                    logger.info("No new emails were found/processed. Database commit skipped.")
+
+                logger.info(f"Sync stats - Fetched: {total_messages}, Limit: {limit}, Inserted: {count}, Skipped Duplicates: {skipped_duplicates}")
+
+                # Trigger automatic AI threat classification pipeline ONLY for newly synced emails
+                for new_id in new_email_ids:
+                    try:
+                        AIService.analyze_email_by_id(db, user, new_id)
+                        logger.info(f"Successfully analyzed email {new_id} via threat classification pipeline.")
+                    except Exception as analysis_err:
+                        logger.warning(f"Skipping sync-time analysis for email {new_id} due to warning: {analysis_err}")
+                return count
+            else:
+                logger.error(f"Gmail API list messages endpoint returned error status: {res.status_code}, Response: {res.text}")
+                if res.status_code == 401:
+                    raise HTTPException(
+                        status_code=status.HTTP_401_UNAUTHORIZED,
+                        detail="Gmail API authentication failed. Please sign in again."
+                    )
+                else:
+                    raise HTTPException(
+                        status_code=status.HTTP_502_BAD_GATEWAY,
+                        detail=f"Gmail API list messages request failed: Google returned HTTP {res.status_code}."
+                    )
+        except HTTPException as http_exc:
+            logger.error(f"Authentication failure or HTTP exception in sync_user_emails: {http_exc.detail}")
+            raise http_exc
+        except Exception as e:
+            logger.exception(f"Unexpected exception during Gmail live sync: {e}")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Gmail API sync failed: {str(e)}"
+            )
 
         return 0
 
