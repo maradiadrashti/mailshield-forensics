@@ -168,11 +168,6 @@ class GmailService:
 
             # 2. If token expired on Gmail side (receives 401), force refresh and retry
             if res.status_code == 401:
-                if used_custom_token:
-                    raise HTTPException(
-                        status_code=status.HTTP_400_BAD_REQUEST,
-                        detail="google access token expired replace it to continue"
-                    )
                 if is_demo:
                     logger.error("MOCK_GOOGLE_ACCESS_TOKEN in .env is expired or invalid.")
                     raise HTTPException(
@@ -180,12 +175,27 @@ class GmailService:
                         detail="The Google access token in your backend .env has expired. Please update MOCK_GOOGLE_ACCESS_TOKEN or sign in with Google."
                     )
                 logger.warning(f"Received 401 Unauthorized from Gmail API. Attempting forced token refresh for user: {user.email}")
-                access_token = AuthService.get_valid_google_access_token(db, user.id, force_refresh=True)
-                headers = {"Authorization": f"Bearer {access_token}"}
-                
-                logger.info(f"Retrying GET request to Gmail API messages list endpoint: {GMAIL_MESSAGES_URL}")
-                res = requests.get(GMAIL_MESSAGES_URL, headers=headers, params=params, timeout=12)
-                logger.info(f"Gmail API list retry response status: {res.status_code}")
+                try:
+                    access_token = AuthService.get_valid_google_access_token(db, user.id, force_refresh=True)
+                    headers = {"Authorization": f"Bearer {access_token}"}
+                    
+                    logger.info(f"Retrying GET request to Gmail API messages list endpoint: {GMAIL_MESSAGES_URL}")
+                    res = requests.get(GMAIL_MESSAGES_URL, headers=headers, params=params, timeout=12)
+                    logger.info(f"Gmail API list retry response status: {res.status_code}")
+                except Exception as refresh_err:
+                    if used_custom_token:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="google access token expired replace it to continue"
+                        )
+                    raise refresh_err
+
+                if res.status_code == 401:
+                    if used_custom_token:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="google access token expired replace it to continue"
+                        )
 
             if res.status_code == 200:
                 messages_data = res.json().get("messages", [])
@@ -210,22 +220,32 @@ class GmailService:
                     msg_res = requests.get(detail_url, headers=headers, timeout=10)
 
                     if msg_res.status_code == 401:
-                        if used_custom_token:
-                            raise HTTPException(
-                                status_code=status.HTTP_400_BAD_REQUEST,
-                                detail="google access token expired replace it to continue"
-                            )
                         if is_demo:
                             raise HTTPException(
                                 status_code=status.HTTP_400_BAD_REQUEST,
                                 detail="The Google access token in your backend .env has expired. Please update MOCK_GOOGLE_ACCESS_TOKEN or sign in with Google."
                             )
                         logger.warning(f"Received 401 Unauthorized during message detail fetch. Attempting token refresh.")
-                        access_token = AuthService.get_valid_google_access_token(db, user.id, force_refresh=True)
-                        headers = {"Authorization": f"Bearer {access_token}"}
-                        
-                        logger.info(f"Retrying details fetch for Gmail message ID: {msg_id}")
-                        msg_res = requests.get(detail_url, headers=headers, timeout=10)
+                        try:
+                            access_token = AuthService.get_valid_google_access_token(db, user.id, force_refresh=True)
+                            headers = {"Authorization": f"Bearer {access_token}"}
+                            
+                            logger.info(f"Retrying details fetch for Gmail message ID: {msg_id}")
+                            msg_res = requests.get(detail_url, headers=headers, timeout=10)
+                        except Exception as refresh_err:
+                            if used_custom_token:
+                                raise HTTPException(
+                                    status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail="google access token expired replace it to continue"
+                                )
+                            raise refresh_err
+
+                        if msg_res.status_code == 401:
+                            if used_custom_token:
+                                raise HTTPException(
+                                    status_code=status.HTTP_400_BAD_REQUEST,
+                                    detail="google access token expired replace it to continue"
+                                )
 
                     logger.info(f"Gmail message detail response status for {msg_id}: {msg_res.status_code}")
 
