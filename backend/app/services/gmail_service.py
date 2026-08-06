@@ -8,7 +8,7 @@ from sqlalchemy import or_, desc
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.oauth_token import OAuthToken
-from app.models.email import EmailMessage
+from app.core.config import settings, BASE_DIR
 
 GMAIL_MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
 URL_REGEX = re.compile(r'https?://[a-zA-Z0-9.\-_\~:/?#\[\]@!$&\'()*+,;=%]+')
