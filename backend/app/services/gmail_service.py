@@ -8,6 +8,7 @@ from sqlalchemy import or_, desc
 from sqlalchemy.orm import Session
 from app.models.user import User
 from app.models.oauth_token import OAuthToken
+from app.models.email import EmailMessage
 from app.core.config import settings, BASE_DIR
 
 GMAIL_MESSAGES_URL = "https://gmail.googleapis.com/gmail/v1/users/me/messages"
@@ -94,12 +95,6 @@ class GmailService:
 
         logger = logging.getLogger("mailshield.services")
 
-        token_record = db.query(OAuthToken).filter(OAuthToken.user_id == user.id).first()
-
-        if not token_record:
-            logger.warning(f"No OAuthToken record found in database for user: {user.email}")
-            return 0
-
         # Check if a custom gmail_token.txt exists in multiple possible locations
         import os
         import re
@@ -131,14 +126,32 @@ class GmailService:
                 except Exception as read_err:
                     logger.error(f"Failed to read custom token file at {path}: {read_err}")
 
+        token_record = db.query(OAuthToken).filter(OAuthToken.user_id == user.id).first()
+
         if custom_token:
-            logger.info("Found custom gmail_token.txt. Overriding stored access token and resetting expiry.")
-            token_record.access_token = custom_token
-            if custom_refresh_token:
-                logger.info("Found custom refresh token in gmail_token.txt. Updating stored refresh token.")
-                token_record.refresh_token = custom_refresh_token
-            token_record.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
+            if not token_record:
+                logger.info(f"No OAuthToken record found in database for user {user.email}. Creating a new one using custom tokens.")
+                token_record = OAuthToken(
+                    user_id=user.id,
+                    access_token=custom_token,
+                    refresh_token=custom_refresh_token or "demo_google_refresh_token_drashti",
+                    token_type="Bearer",
+                    scope="openid email profile https://www.googleapis.com/auth/gmail.readonly",
+                    expires_at=datetime.now(timezone.utc) + timedelta(hours=1)
+                )
+                db.add(token_record)
+            else:
+                logger.info("Found custom gmail_token.txt. Overriding stored access token and resetting expiry.")
+                token_record.access_token = custom_token
+                if custom_refresh_token:
+                    logger.info("Found custom refresh token in gmail_token.txt. Updating stored refresh token.")
+                    token_record.refresh_token = custom_refresh_token
+                token_record.expires_at = datetime.now(timezone.utc) + timedelta(hours=1)
             db.commit()
+
+        if not token_record:
+            logger.warning(f"No OAuthToken record found in database for user: {user.email}")
+            return 0
 
         used_custom_token = (custom_token is not None)
 

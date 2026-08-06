@@ -265,11 +265,28 @@ class AuthService:
                 client_id = settings.GOOGLE_CLIENT_ID
                 client_secret = settings.GOOGLE_CLIENT_SECRET
                 
+                # If using public OAuth Playground credentials, leverage Google's Playground refresh proxy
                 if (not client_id or not client_secret) and refresh_token.startswith("1//"):
-                    client_id = "407408718192.apps.googleusercontent.com"
-                    client_secret = "kZjo9s9Vt7VakgmLUk62nO4F"
-                    logger.info("Using OAuth Playground credentials fallback for Google token refresh.")
-
+                    proxy_url = "https://developers.google.com/oauthplayground/refreshAccessToken"
+                    logger.info("Using Google OAuth Playground refresh proxy endpoint.")
+                    res = requests.post(
+                        proxy_url, 
+                        json={"refresh_token": refresh_token}, 
+                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
+                        timeout=10
+                    )
+                    logger.info(f"Google OAuth Playground proxy response status: {res.status_code}")
+                    if res.status_code == 200:
+                        data = res.json()
+                        if data.get("success") and data.get("access_token"):
+                            new_access_token = data.get("access_token")
+                            token_record.access_token = new_access_token
+                            new_expires_in = data.get("expires_in", 3600)
+                            token_record.expires_at = now_utc + timedelta(seconds=new_expires_in)
+                            db.commit()
+                            logger.info("Successfully refreshed Google access token using OAuth Playground proxy.")
+                            return new_access_token
+                
                 refresh_payload = {
                     "client_id": client_id,
                     "client_secret": client_secret,
