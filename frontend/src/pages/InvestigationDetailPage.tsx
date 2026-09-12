@@ -35,31 +35,26 @@ import 'leaflet/dist/leaflet.css';
 import { ForensicHeaderResponse, EmailMessage, AnalysisResult } from '../types';
 import { CircularThreatGauge } from '../components/analysis/CircularThreatGauge';
 
-// Custom DIV icon for the Origin / First Hop
-const originMarkerIcon = L.divIcon({
-  className: 'custom-gps-marker-origin',
-  html: `<div class="relative flex items-center justify-center">
-    <div class="absolute w-8 h-8 rounded-full bg-rose-500/35 animate-ping"></div>
-    <div class="relative w-5 h-5 rounded-full bg-gradient-to-tr from-rose-500 to-orange-600 border border-white/30 flex items-center justify-center shadow-lg shadow-rose-500/50">
-      <div class="w-2 h-2 rounded-full bg-white"></div>
-    </div>
-  </div>`,
-  iconSize: [32, 32],
-  iconAnchor: [16, 16],
-});
-
-// Custom DIV icon for Intermediate Relay Hops
-const relayMarkerIcon = L.divIcon({
-  className: 'custom-gps-marker-relay',
-  html: `<div class="relative flex items-center justify-center">
-    <div class="absolute w-6 h-6 rounded-full bg-blue-500/30 animate-ping"></div>
-    <div class="relative w-4 h-4 rounded-full bg-gradient-to-tr from-blue-500 to-indigo-600 border border-white/20 flex items-center justify-center shadow-lg shadow-blue-500/50">
-      <div class="w-1.5 h-1.5 rounded-full bg-white"></div>
-    </div>
-  </div>`,
-  iconSize: [24, 24],
-  iconAnchor: [12, 12],
-});
+// Custom DIV icon generator for Green Map Markers
+const createGreenMarkerIcon = (hopNum: number, isOrigin: boolean, isDestination: boolean) => {
+  const label = isOrigin ? 'Origin' : isDestination ? 'Ingress MX' : `Relay H${hopNum}`;
+  return L.divIcon({
+    className: 'custom-gps-marker-green',
+    html: `
+      <div class="relative flex flex-col items-center justify-center -translate-y-2">
+        ${isOrigin ? '<div class="absolute w-8 h-8 rounded-full bg-emerald-500/25 animate-ping"></div>' : ''}
+        <div class="relative w-6 h-6 rounded-full bg-slate-950 border-2 border-emerald-400 flex items-center justify-center shadow-lg shadow-emerald-500/40">
+          <span class="text-[10px] font-bold font-mono text-emerald-400 leading-none">H${hopNum}</span>
+        </div>
+        <div class="mt-0.5 px-1.5 py-0.2 rounded bg-slate-900/95 border border-emerald-500/40 text-[8px] font-mono text-emerald-300 whitespace-nowrap shadow">
+          ${label}
+        </div>
+      </div>
+    `,
+    iconSize: [30, 38],
+    iconAnchor: [15, 19],
+  });
+};
 
 // Helper component to auto-zoom & fit bounds dynamically
 const MapBoundsController: React.FC<{ hops: any[] }> = ({ hops }) => {
@@ -69,9 +64,11 @@ const MapBoundsController: React.FC<{ hops: any[] }> = ({ hops }) => {
       .filter((h) => h.latitude !== null && h.longitude !== null && h.latitude !== undefined && h.longitude !== undefined)
       .map((h) => [h.latitude!, h.longitude!] as [number, number]);
 
-    if (validCoords.length > 0) {
+    if (validCoords.length === 1) {
+      map.setView(validCoords[0], 4);
+    } else if (validCoords.length > 1) {
       const bounds = L.latLngBounds(validCoords);
-      map.fitBounds(bounds, { padding: [50, 50], maxZoom: 12 });
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 8 });
     }
   }, [hops, map]);
   return null;
@@ -633,11 +630,11 @@ export const InvestigationDetailPage: React.FC<InvestigationDetailPageProps> = (
                         H{hop.hop}
                       </span>
                       <div className="flex flex-col text-left">
-                        <span className="text-white font-bold text-[11px] truncate max-w-[120px]" title={hop.ip || 'Local/Unknown'}>
-                          {hop.ip || 'Local/Unknown'}
+                        <span className="text-white font-bold text-[11px] truncate max-w-[120px]" title={hop.ip || 'Internal Gateway'}>
+                          {hop.ip || 'Internal Gateway'}
                         </span>
-                        <span className="text-[10px] text-slate-500 truncate max-w-[120px]">
-                          {hop.city ? `${hop.city}, ${hop.country}` : 'Local Address'}
+                        <span className="text-[10px] text-slate-500 truncate max-w-[120px]" title={hop.city && hop.city !== 'Unknown' ? `${hop.city}, ${hop.country}` : hop.country || 'Local Network'}>
+                          {hop.city && hop.city !== 'Unknown' ? `${hop.city}, ${hop.country}` : (hop.country && hop.country !== 'Unknown' ? hop.country : 'Local Network')}
                         </span>
                       </div>
                     </div>
@@ -689,40 +686,45 @@ export const InvestigationDetailPage: React.FC<InvestigationDetailPageProps> = (
               maxBoundsViscosity={1.0}
             >
               <TileLayer
-                attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors &copy; <a href="https://carto.com/attributions">CARTO</a>'
-                url="https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png"
+                attribution='Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ'
+                url="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}"
                 noWrap={true}
               />
               <MapBoundsController hops={routeHops} />
               
-              {/* Draw polylines connecting hops chronologically */}
+              {/* Draw polylines connecting hops chronologically with emerald dotted line */}
               <Polyline
                 positions={polylineCoordinates}
-                color="#3b82f6"
+                color="#10b981"
                 weight={3}
-                opacity={0.8}
-                dashArray="5, 10"
+                opacity={0.9}
+                dashArray="6, 8"
               />
 
-              {/* Draw hop marker pins */}
+              {/* Draw hop marker pins with all-green sleek design */}
               {mapHops.map((hop) => {
                 const maxHopSeq = Math.max(...routeHops.map((h) => h.hop));
+                const minHopSeq = Math.min(...routeHops.map((h) => h.hop));
                 const isOrigin = hop.hop === maxHopSeq;
+                const isDestination = hop.hop === minHopSeq;
                 return (
                   <Marker
                     key={hop.hop}
                     position={[hop.latitude!, hop.longitude!]}
-                    icon={isOrigin ? originMarkerIcon : relayMarkerIcon}
+                    icon={createGreenMarkerIcon(hop.hop, isOrigin, isDestination)}
                   >
                     <Popup>
-                      <div className="space-y-1 text-xs">
-                        <div className="font-mono text-blue-400 font-bold border-b border-slate-800/80 pb-1">
-                          Hop {hop.hop} {isOrigin ? '(Origin)' : ''}
+                      <div className="space-y-1.5 text-xs p-1">
+                        <div className="font-mono text-emerald-400 font-bold border-b border-slate-800 pb-1 flex items-center justify-between">
+                          <span>Hop {hop.hop}</span>
+                          <span className="text-[10px] text-emerald-300 font-normal">
+                            {isOrigin ? '(Origin MTA)' : isDestination ? '(Ingress MX)' : '(Intermediate Relay)'}
+                          </span>
                         </div>
-                        <div><span className="text-slate-500">IP:</span> <span className="font-mono">{hop.ip || '—'}</span></div>
-                        <div><span className="text-slate-500">Location:</span> {hop.city}, {hop.country}</div>
-                        <div><span className="text-slate-500">ISP:</span> {hop.isp}</div>
-                        <div><span className="text-slate-500">ASN:</span> {hop.asn}</div>
+                        <div><span className="text-slate-400">IP Address:</span> <span className="font-mono text-white font-semibold">{hop.ip || '—'}</span></div>
+                        <div><span className="text-slate-400">Location:</span> <span className="text-slate-200">{hop.city && hop.city !== 'Unknown' ? `${hop.city}, ${hop.country}` : hop.country}</span></div>
+                        <div><span className="text-slate-400">ISP:</span> <span className="text-slate-200">{hop.isp}</span></div>
+                        <div><span className="text-slate-400">ASN:</span> <span className="font-mono text-slate-200">{hop.asn}</span></div>
                       </div>
                     </Popup>
                   </Marker>

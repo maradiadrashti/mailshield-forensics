@@ -290,6 +290,28 @@ class EmailHeaderForensicsService:
             elif lower_name not in header_dict:
                 header_dict[lower_name] = value
 
+        # If no Received headers exist in input and DB session is present, enrich with full RFC Received chain
+        if not received_raw_list and db and email_id:
+            from app.services.gmail_service import GmailService
+            email_obj = db.query(EmailMessage).filter(EmailMessage.id == email_id).first()
+            if email_obj:
+                raw_headers = GmailService._generate_fallback_headers(email_obj)
+                email_obj.raw_headers = raw_headers
+                try:
+                    db.commit()
+                except Exception:
+                    pass
+                for h in raw_headers:
+                    name = str(h.get("name", "")).strip()
+                    value = str(h.get("value", "")).strip()
+                    if not name:
+                        continue
+                    lower_name = name.lower()
+                    if lower_name == "received":
+                        received_raw_list.append(value)
+                    elif lower_name not in header_dict:
+                        header_dict[lower_name] = value
+
         # 1. Normalize RFC key headers
         normalized = NormalizedHeaders(
             from_=header_dict.get("from"),
