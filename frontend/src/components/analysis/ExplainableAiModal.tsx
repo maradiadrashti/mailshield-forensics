@@ -5,7 +5,7 @@ import { RiskScoreMeter } from './RiskScoreMeter';
 import { UrlAnalysisCard } from './UrlAnalysisCard';
 import { MisinformationCard } from './MisinformationCard';
 import { Badge } from '../ui/Badge';
-import { formatDate } from '../../utils/formatters';
+import { formatDate, getThreatTier } from '../../utils/formatters';
 import { trustedSenderApi } from '../../services/trustedSenderApi';
 import { analysisApi } from '../../services/analysisApi';
 
@@ -26,11 +26,7 @@ export const ExplainableAiModal: React.FC<ExplainableAiModalProps> = ({
 
   if (!email || !analysis) return null;
 
-  const getThreatBadgeVariant = (threat: string) => {
-    if (threat === 'Safe') return 'success';
-    if (threat === 'Phishing' || threat === 'Scam') return 'danger';
-    return 'warning';
-  };
+  const threatTier = getThreatTier(analysis.risk_score);
 
   const handleTrustSender = async () => {
     setTrusting(true);
@@ -75,8 +71,15 @@ export const ExplainableAiModal: React.FC<ExplainableAiModalProps> = ({
                 <Cpu className="w-3.5 h-3.5 text-blue-400" />
                 EXPLAINABLE AI THREAT ANALYSIS
               </Badge>
-              <Badge variant={getThreatBadgeVariant(analysis.threat_type)} className="uppercase font-bold py-0.5">
-                {analysis.threat_type}
+              <Badge
+                variant={threatTier.variant}
+                className="font-mono text-[10px] uppercase font-bold flex items-center gap-1 py-0.5"
+              >
+                <span className={`w-1.5 h-1.5 rounded-full ${
+                  threatTier.variant === 'success' ? 'bg-emerald-400' :
+                  threatTier.variant === 'warning' ? 'bg-amber-400' : 'bg-rose-400'
+                }`}></span>
+                {threatTier.label} ({analysis.risk_score})
               </Badge>
               {analysis.is_trusted_sender ? (
                 <Badge variant="success" className="font-semibold flex items-center gap-1.5 py-0.5">

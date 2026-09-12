@@ -36,7 +36,11 @@ const formatSyncLabel = (syncedAt: number | null, now: number) => {
   return `Synced ${elapsedDays} day${elapsedDays === 1 ? '' : 's'} ago`;
 };
 
-export const InboxPage: React.FC = () => {
+interface InboxPageProps {
+  onOpenInvestigation?: (id: string) => void;
+}
+
+export const InboxPage: React.FC<InboxPageProps> = ({ onOpenInvestigation }) => {
   const [emails, setEmails] = useState<EmailMessage[]>([]);
   const [total, setTotal] = useState<number>(0);
   const [page, setPage] = useState<number>(1);
@@ -290,6 +294,7 @@ export const InboxPage: React.FC = () => {
               email={email}
               onClick={handleSelectEmail}
               onInspect={handleInspectAi}
+              onOpenInvestigation={onOpenInvestigation}
             />
           ))}
         </div>

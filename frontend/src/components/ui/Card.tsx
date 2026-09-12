@@ -3,7 +3,7 @@ import React from 'react';
 interface CardProps {
   children: React.ReactNode;
   className?: string;
-  glow?: 'blue' | 'emerald' | 'rose' | 'none';
+  glow?: 'blue' | 'emerald' | 'rose' | 'amber' | 'none';
 }
 
 export const Card: React.FC<CardProps> = ({ children, className = '', glow = 'none' }) => {
@@ -11,6 +11,7 @@ export const Card: React.FC<CardProps> = ({ children, className = '', glow = 'no
     blue: 'glow-blue',
     emerald: 'glow-emerald',
     rose: 'glow-rose',
+    amber: 'glow-amber',
     none: '',
   };
 

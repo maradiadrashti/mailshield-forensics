@@ -40,6 +40,7 @@ const formatSyncLabel = (syncedAt: number | null, now: number) => {
 
 export const DashboardPage: React.FC = () => {
   const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [tierCounts, setTierCounts] = useState<{ suspicious: number; dangerous: number } | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [syncing, setSyncing] = useState<boolean>(false);
@@ -62,6 +63,24 @@ export const DashboardPage: React.FC = () => {
     try {
       const data = await dashboardApi.getStats();
       setStats(data);
+
+      try {
+        const batchRes = await analysisApi.batchAnalyze();
+        if (batchRes && batchRes.results) {
+          let suspicious = 0;
+          let dangerous = 0;
+          batchRes.results.forEach((r) => {
+            if (r.risk_score >= 71) {
+              dangerous++;
+            } else if (r.risk_score >= 31) {
+              suspicious++;
+            }
+          });
+          setTierCounts({ suspicious, dangerous });
+        }
+      } catch (err) {
+        console.warn('Batch analyze fetch in dashboard skipped:', err);
+      }
     } catch (err: any) {
       console.error('Failed to load dashboard statistics:', err);
       setError(err.response?.data?.detail || err.message || 'Unable to load dashboard intelligence.');
@@ -149,6 +168,19 @@ export const DashboardPage: React.FC = () => {
     );
   }
 
+  // Client-side computation of suspicious (31-70) vs confirmed dangerous (71-100)
+  const suspiciousEmailsCount = tierCounts
+    ? tierCounts.suspicious
+    : (stats.recent_threats || []).filter(
+        (t) => (t.analysis?.risk_score ?? 0) >= 31 && (t.analysis?.risk_score ?? 0) <= 70
+      ).length;
+
+  const confirmedDangerousCount = tierCounts
+    ? tierCounts.dangerous
+    : (stats.recent_threats || []).filter(
+        (t) => (t.analysis?.risk_score ?? 0) >= 71
+      ).length;
+
   return (
     <div className="space-y-8">
       {/* Top Banner */}
@@ -195,7 +227,7 @@ export const DashboardPage: React.FC = () => {
       )}
 
       {/* Metric Stat Cards Grid */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-5">
         <StatCard
           title="Total Inbox Emails"
           value={stats.total_emails}
@@ -211,14 +243,21 @@ export const DashboardPage: React.FC = () => {
           glow="emerald"
         />
         <StatCard
-          title="Dangerous Threat Emails"
-          value={stats.dangerous_emails}
-          subtitle="Phishing & scam detections"
+          title="Suspicious — Needs Review"
+          value={suspiciousEmailsCount}
+          subtitle="Tier: 31-70 risk score"
+          icon={<AlertTriangle className="w-6 h-6 text-amber-400" />}
+          glow="amber"
+        />
+        <StatCard
+          title="Confirmed Dangerous"
+          value={confirmedDangerousCount}
+          subtitle="Tier: 71-100 risk score"
           icon={<ShieldAlert className="w-6 h-6 text-rose-400" />}
           glow="rose"
         />
         <StatCard
-          title="Threat Detection Rate"
+          title="% Emails Flagged"
           value={`${stats.threat_detection_rate}%`}
           subtitle="AI Flagged Ratio"
           icon={<Cpu className="w-6 h-6 text-cyan-400" />}
@@ -227,7 +266,7 @@ export const DashboardPage: React.FC = () => {
 
       {/* Main Analytics Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <InboxRiskMeter score={stats.inbox_security_score} />
+        <InboxRiskMeter score={stats.inbox_security_score} totalEmails={stats.total_emails} />
         <div className="lg:col-span-2">
           <ThreatCategoryChart categories={stats.threat_categories} />
         </div>

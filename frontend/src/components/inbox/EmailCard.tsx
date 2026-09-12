@@ -1,23 +1,25 @@
 import React from 'react';
-import { Link2, Paperclip, Calendar, Cpu } from 'lucide-react';
+import { Link2, Paperclip, Calendar, Search } from 'lucide-react';
 import { EmailMessage } from '../../types';
 import { Badge } from '../ui/Badge';
 import { RiskScoreMeter } from '../analysis/RiskScoreMeter';
-import { formatDate } from '../../utils/formatters';
+import { formatDate, getThreatTier } from '../../utils/formatters';
 
 interface EmailCardProps {
   email: EmailMessage;
   onClick: (email: EmailMessage) => void;
   onInspect?: (email: EmailMessage) => void;
+  onOpenInvestigation?: (id: string) => void;
 }
 
-export const EmailCard: React.FC<EmailCardProps> = ({ email, onClick, onInspect }) => {
+export const EmailCard: React.FC<EmailCardProps> = ({ email, onClick, onInspect, onOpenInvestigation }) => {
   const getSenderInitials = (senderStr: string) => {
     const clean = senderStr.replace(/<.*>/, '').trim();
     return clean ? clean.slice(0, 2).toUpperCase() : 'GM';
   };
 
   const analysis = email.analysis;
+  const threatTier = analysis ? getThreatTier(analysis.risk_score) : null;
 
   return (
     <div
@@ -60,33 +62,24 @@ export const EmailCard: React.FC<EmailCardProps> = ({ email, onClick, onInspect 
       {/* Footer Tags & Metadata */}
       <div className="flex items-center justify-between pt-2 border-t border-slate-800/60 text-xs">
         <div className="flex items-center space-x-2">
-          {analysis && analysis.is_trusted_sender ? (
-            <>
-              <Badge variant="success" className="font-mono text-[10px] uppercase font-bold flex items-center gap-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
-                Trusted Sender
-              </Badge>
-              {analysis.risk_score >= 60 ? (
-                <Badge variant="danger" className="font-mono text-[10px] uppercase font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
-                  High Risk
-                </Badge>
-              ) : analysis.risk_score >= 40 ? (
-                <Badge variant="warning" className="font-mono text-[10px] uppercase font-bold flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-400"></span>
-                  Suspicious URLs
-                </Badge>
-              ) : null}
-            </>
-          ) : (
-            analysis && (
-              <Badge
-                variant={analysis.risk_score >= 70 ? 'danger' : analysis.risk_score >= 40 ? 'warning' : 'success'}
-                className="font-mono text-[10px] uppercase font-bold"
-              >
-                {analysis.threat_type}
-              </Badge>
-            )
+          {analysis && analysis.is_trusted_sender && (
+            <Badge variant="success" className="font-mono text-[10px] uppercase font-bold flex items-center gap-1">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+              Trusted Sender
+            </Badge>
+          )}
+
+          {threatTier && (
+            <Badge
+              variant={threatTier.variant}
+              className="font-mono text-[10px] uppercase font-bold flex items-center gap-1"
+            >
+              <span className={`w-1.5 h-1.5 rounded-full ${
+                threatTier.variant === 'success' ? 'bg-emerald-400' :
+                threatTier.variant === 'warning' ? 'bg-amber-400' : 'bg-rose-400'
+              }`}></span>
+              {threatTier.label}
+            </Badge>
           )}
 
           {email.links.length > 0 && (
@@ -107,11 +100,15 @@ export const EmailCard: React.FC<EmailCardProps> = ({ email, onClick, onInspect 
         <button
           onClick={(e) => {
             e.stopPropagation();
-            onInspect?.(email);
+            if (onOpenInvestigation) {
+              onOpenInvestigation(email.id);
+            } else {
+              onInspect?.(email);
+            }
           }}
           className="text-[11px] text-blue-400 hover:text-blue-300 flex items-center gap-1 font-semibold group-hover:translate-x-0.5 transition-all duration-150 focus:outline-none"
         >
-          <Cpu className="w-3.5 h-3.5" /> Inspect AI Analysis &rarr;
+          <Search className="w-3.5 h-3.5" /> Open Investigation &rarr;
         </button>
       </div>
     </div>

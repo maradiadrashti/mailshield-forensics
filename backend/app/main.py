@@ -17,7 +17,9 @@ from app.core.config import settings
 from app.routes import router as api_routes
 from app.middleware import setup_cors, LoggingMiddleware, RateLimitMiddleware
 from app.core.security import SecurityHeadersMiddleware
+import asyncio
 from app.database.session import init_db
+from app.services.gmail_sync_worker import periodic_gmail_sync_loop
 
 
 @asynccontextmanager
@@ -27,7 +29,18 @@ async def lifespan(app: FastAPI):
         init_db()
     except Exception as e:
         print(f"Warning: Database initialization error: {e}")
+
+    # Start background Gmail sync worker (polls every 30 seconds)
+    sync_worker_task = asyncio.create_task(periodic_gmail_sync_loop(interval_seconds=30))
+
     yield
+
+    # Graceful shutdown
+    sync_worker_task.cancel()
+    try:
+        await sync_worker_task
+    except asyncio.CancelledError:
+        pass
 
 
 app = FastAPI(

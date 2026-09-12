@@ -26,6 +26,7 @@ class EmailMessage(Base):
     # Structured Extracted JSON data
     links: Mapped[list[str]] = mapped_column(JSON, default=list)
     attachments: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    raw_headers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=lambda: datetime.now(timezone.utc)

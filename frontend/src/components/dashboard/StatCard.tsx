@@ -6,7 +6,7 @@ interface StatCardProps {
   value: string | number;
   subtitle?: string;
   icon: React.ReactNode;
-  glow?: 'blue' | 'emerald' | 'rose' | 'none';
+  glow?: 'blue' | 'emerald' | 'rose' | 'amber' | 'none';
   trend?: 'up' | 'down' | 'neutral';
 }
 

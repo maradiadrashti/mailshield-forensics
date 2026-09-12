@@ -30,8 +30,6 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     # Default redirect to backend callback that forwards to the frontend callback
     GOOGLE_REDIRECT_URI: str = "http://localhost:8000/api/v1/auth/google/callback"
-    MOCK_GOOGLE_ACCESS_TOKEN: str = ""
-    MOCK_GOOGLE_REFRESH_TOKEN: str = ""
 
     # AI
     HUGGINGFACE_API_TOKEN: str = ""

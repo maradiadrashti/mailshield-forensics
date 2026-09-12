@@ -1,3 +1,4 @@
+import logging
 from datetime import datetime, timezone
 from fastapi import HTTPException, status
 from sqlalchemy.orm import Session
@@ -6,6 +7,8 @@ from app.models.email import EmailMessage
 from app.models.analysis_result import AnalysisResult
 from app.ai.scoring_engine import ScoringEngine
 
+logger = logging.getLogger("mailshield.ai_service")
+
 
 class AIService:
     @classmethod
@@ -13,6 +16,16 @@ class AIService:
         email = db.query(EmailMessage).filter(
             EmailMessage.id == email_id, EmailMessage.user_id == user.id
         ).first()
+
+        if not email:
+            from app.models.investigation import Investigation
+            inv = db.query(Investigation).filter(
+                Investigation.id == email_id, Investigation.user_id == user.id
+            ).first()
+            if inv:
+                email = db.query(EmailMessage).filter(
+                    EmailMessage.id == inv.email_id, EmailMessage.user_id == user.id
+                ).first()
 
         if not email:
             raise HTTPException(
@@ -56,7 +69,31 @@ class AIService:
                 return existing_result
             force = True
 
-        # Run AI & Scoring Engine Analysis
+        # Extract email headers and parse forensic metadata
+        from app.services.email_header_forensics_service import EmailHeaderForensicsService
+        raw_headers = email.raw_headers or []
+        if not raw_headers:
+            try:
+                from app.services.gmail_service import GmailService
+                raw_headers = GmailService.fetch_raw_message_headers(db, user, email.id)
+            except Exception:
+                raw_headers = []
+
+        forensic_res = EmailHeaderForensicsService.parse_headers(raw_headers, email_id=email.id, db=db)
+
+        # Query historical emails from the same sender in database (excluding current email)
+        historical_emails = []
+        try:
+            historical_emails = db.query(EmailMessage).filter(
+                EmailMessage.user_id == user.id,
+                EmailMessage.id != email.id,
+                (EmailMessage.sender.ilike(f"%{clean_sender_email}%") | (EmailMessage.sender == email.sender))
+            ).order_by(EmailMessage.date.desc()).limit(25).all()
+        except Exception as e:
+            logger.warning(f"Could not fetch historical emails for sender '{email.sender}': {e}")
+            historical_emails = []
+
+        # Run AI & Scoring Engine Analysis (3-Layer Explainable Engine)
         analysis_data = ScoringEngine.analyze_email(
             sender=email.sender,
             recipient=email.recipient,
@@ -64,7 +101,13 @@ class AIService:
             body_text=email.body_text or "",
             links=email.links or [],
             attachments=email.attachments or [],
-            is_trusted_sender=is_trusted
+            is_trusted_sender=is_trusted,
+            authentication=forensic_res.authentication,
+            network_intelligence=forensic_res.network_intelligence,
+            route_hops=forensic_res.route_hops,
+            received_chain=forensic_res.received_chain,
+            raw_headers=raw_headers,
+            historical_emails=historical_emails
         )
 
         if existing_result:

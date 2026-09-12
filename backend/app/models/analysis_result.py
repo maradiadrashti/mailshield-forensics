@@ -37,3 +37,28 @@ class AnalysisResult(Base):
     # Relationships
     email: Mapped["EmailMessage"] = relationship("EmailMessage")
     user: Mapped["User"] = relationship("User")
+
+    @property
+    def layers(self) -> dict[str, Any] | None:
+        if isinstance(self.breakdown, dict):
+            return self.breakdown.get("layers")
+        return None
+
+    @property
+    def verdict(self) -> str:
+        if isinstance(self.breakdown, dict) and "verdict" in self.breakdown:
+            return self.breakdown["verdict"]
+        return self.threat_type
+
+    @property
+    def severity(self) -> str:
+        if isinstance(self.breakdown, dict) and "severity" in self.breakdown:
+            return self.breakdown["severity"]
+        if self.risk_score >= 75:
+            return "critical"
+        elif self.risk_score >= 50:
+            return "high"
+        elif self.risk_score >= 25:
+            return "low"
+        return "safe"
+

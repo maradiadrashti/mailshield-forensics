@@ -2,9 +2,11 @@ import React, { useState } from 'react';
 import { X, Link2, Paperclip, Calendar, User, FileText, UserCheck, RefreshCw } from 'lucide-react';
 import { EmailMessage } from '../../types';
 import { Badge } from '../ui/Badge';
-import { formatDate } from '../../utils/formatters';
+import { formatDate, getThreatTier } from '../../utils/formatters';
 import { trustedSenderApi } from '../../services/trustedSenderApi';
 import { analysisApi } from '../../services/analysisApi';
+import { RiskScoreMeter } from '../analysis/RiskScoreMeter';
+
 
 interface EmailDetailModalProps {
   email: EmailMessage | null;
@@ -80,6 +82,8 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ email, onClo
     }
   };
 
+  const threatTier = email.analysis ? getThreatTier(email.analysis.risk_score) : null;
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-950/80 backdrop-blur-sm animate-in fade-in duration-200">
       <div
@@ -91,6 +95,18 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ email, onClo
           <div className="space-y-2 pr-6">
             <div className="flex items-center gap-2 flex-wrap">
               <Badge variant="info">GMAIL MESSAGE INSPECTOR</Badge>
+              {threatTier && (
+                <Badge
+                  variant={threatTier.variant}
+                  className="font-mono text-[10px] uppercase font-bold flex items-center gap-1"
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${
+                    threatTier.variant === 'success' ? 'bg-emerald-400' :
+                    threatTier.variant === 'warning' ? 'bg-amber-400' : 'bg-rose-400'
+                  }`}></span>
+                  {threatTier.label} ({email.analysis?.risk_score})
+                </Badge>
+              )}
               {email.analysis?.is_trusted_sender ? (
                 <button
                   onClick={handleUntrustSender}
@@ -144,13 +160,22 @@ export const EmailDetailModal: React.FC<EmailDetailModalProps> = ({ email, onClo
             </div>
           </div>
 
-          <button
-            onClick={onClose}
-            className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors focus:outline-none shrink-0"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-3 shrink-0">
+            {email.analysis && (
+              <div className="flex flex-col items-center">
+                <RiskScoreMeter score={email.analysis.risk_score} size="sm" />
+                <span className="text-[9px] font-mono text-slate-400 mt-0.5">Threat Score</span>
+              </div>
+            )}
+            <button
+              onClick={onClose}
+              className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition-colors focus:outline-none shrink-0"
+            >
+              <X className="w-5 h-5" />
+            </button>
+          </div>
         </div>
+
 
         {/* Scrollable Body Content */}
         <div className="p-6 overflow-y-auto flex-1 space-y-6">

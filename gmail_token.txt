@@ -1,3 +1,0 @@
-# Paste your fresh Google Access Token from OAuth Playground here:
-# (e.g. ya29.a0ARGnu...)
-# The backend will automatically detect changes in this file and reload the session.

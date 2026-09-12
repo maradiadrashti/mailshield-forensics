@@ -59,6 +59,16 @@ class GmailController:
         ).first()
 
         if not email:
+            from app.models.investigation import Investigation
+            inv = db.query(Investigation).filter(
+                Investigation.id == email_id, Investigation.user_id == user.id
+            ).first()
+            if inv:
+                email = db.query(EmailMessage).filter(
+                    EmailMessage.id == inv.email_id, EmailMessage.user_id == user.id
+                ).first()
+
+        if not email:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Email message with ID '{email_id}' was not found."

@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Shield, LogOut, ChevronDown, CheckCircle2, LayoutDashboard, Mail, UserCheck } from 'lucide-react';
+import { Shield, LogOut, ChevronDown, CheckCircle2, LayoutDashboard, Mail, UserCheck, ScanSearch } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { Badge } from '../ui/Badge';
 
 interface NavbarProps {
-  currentTab?: 'dashboard' | 'inbox' | 'trusted';
-  onTabChange?: (tab: 'dashboard' | 'inbox' | 'trusted') => void;
+  currentTab?: 'dashboard' | 'inbox' | 'forensics' | 'trusted';
+  onTabChange?: (tab: 'dashboard' | 'inbox' | 'forensics' | 'trusted') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTab = 'dashboard', onTabChange }) => {
@@ -43,7 +43,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab = 'dashboard', onTabC
             </div>
             <div>
               <h1 className="text-lg font-bold text-white tracking-wide flex items-center gap-2">
-                MailShield <span className="text-blue-500 font-mono">AI</span>
+                MailShield <span className="text-blue-500 font-mono">Forensics</span>
               </h1>
             </div>
           </div>
@@ -72,6 +72,18 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab = 'dashboard', onTabC
               >
                 <Mail className="w-3.5 h-3.5" />
                 <span>Gmail Inbox</span>
+              </button>
+
+              <button
+                onClick={() => onTabChange?.('forensics')}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                  currentTab === 'forensics'
+                    ? 'bg-blue-600 text-white font-semibold shadow'
+                    : 'text-slate-400 hover:text-slate-200'
+                }`}
+              >
+                <ScanSearch className="w-3.5 h-3.5" />
+                <span>Forensics</span>
               </button>
 
               <button

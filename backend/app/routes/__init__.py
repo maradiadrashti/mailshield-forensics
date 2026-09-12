@@ -7,6 +7,7 @@ from app.routes.url_analysis import router as url_analysis_router
 from app.routes.dashboard import router as dashboard_router
 from app.routes.ocr import router as ocr_router
 from app.routes.trusted_sender import router as trusted_sender_router
+from app.routes.forensics import router as forensics_router
 
 router = APIRouter()
 router.include_router(health_router)
@@ -17,3 +18,5 @@ router.include_router(url_analysis_router)
 router.include_router(dashboard_router)
 router.include_router(ocr_router)
 router.include_router(trusted_sender_router)
+router.include_router(forensics_router)
+

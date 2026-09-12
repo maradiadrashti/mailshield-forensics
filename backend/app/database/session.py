@@ -28,6 +28,14 @@ def init_db() -> None:
     Automatically creates SQLite database file if it does not exist.
     """
     Base.metadata.create_all(bind=engine)
+    try:
+        with engine.connect() as conn:
+            columns = [col[1] for col in conn.exec_driver_sql("PRAGMA table_info(email_messages)").fetchall()]
+            if "raw_headers" not in columns:
+                conn.exec_driver_sql("ALTER TABLE email_messages ADD COLUMN raw_headers JSON DEFAULT '[]'")
+                conn.commit()
+    except Exception as e:
+        print(f"Notice during init_db column check: {e}")
 
 
 def get_db() -> Generator[Session, None, None]:

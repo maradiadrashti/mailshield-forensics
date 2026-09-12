@@ -3,21 +3,10 @@ import { Shield, Lock, Cpu, Eye, ArrowRight } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { Card } from '../components/ui/Card';
 import { Badge } from '../components/ui/Badge';
-import { Button } from '../components/ui/Button';
 
 export const LoginPage: React.FC = () => {
-  const { loginWithGoogle, handleAuthCallback, isAuthenticated } = useAuth();
+  const { loginWithGoogle, isAuthenticated } = useAuth();
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const showDevDemo = import.meta.env.VITE_ENABLE_DEV_DEMO !== 'false';
-
-  const handleDemoLogin = async () => {
-    try {
-      await handleAuthCallback("demo_google_auth_code");
-      window.location.href = '/';
-    } catch (err) {
-      console.error('Demo login failed:', err);
-    }
-  };
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -45,10 +34,10 @@ export const LoginPage: React.FC = () => {
             <Shield className="w-12 h-12 animate-pulse" />
           </div>
           <h1 className="text-3xl font-extrabold text-white tracking-tight flex items-center justify-center gap-2">
-            MailShield <span className="text-blue-500 font-mono">AI</span>
+            MailShield <span className="text-blue-500 font-mono">Forensics</span>
           </h1>
           <p className="text-slate-400 text-sm">
-            Production AI Email Security & Phishing Prevention Platform
+            AI-Powered Email Threat Detection & Forensic Intelligence
           </p>
         </div>
 
@@ -56,7 +45,7 @@ export const LoginPage: React.FC = () => {
         <Card glow="blue" className="p-8 space-y-6">
           <div className="space-y-2 text-center">
             <Badge variant="info">OAUTH 2.0 SECURITY</Badge>
-            <h2 className="text-xl font-bold text-white">Sign in to MailShield AI</h2>
+            <h2 className="text-xl font-bold text-white">Sign in to MailShield Forensics</h2>
             <p className="text-xs text-slate-400">
               Connect your Gmail account securely to scan inboxes for threats, scams, and misinformation.
             </p>
@@ -72,7 +61,7 @@ export const LoginPage: React.FC = () => {
             {/* Google OAuth Login Button */}
             <button
               onClick={loginWithGoogle}
-              className="w-full flex items-center justify-center space-x-3 px-4 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm border border-blue-400/30 transition-all duration-200 shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-400 group"
+              className="w-full flex items-center justify-center space-x-3 px-4 py-3.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm border border-blue-400/30 transition-all duration-200 shadow-xl focus:outline-none focus:ring-2 focus:ring-blue-400 group cursor-pointer"
             >
               <svg className="w-5 h-5 shrink-0 bg-white rounded-full p-0.5" viewBox="0 0 24 24">
                 <path
@@ -95,26 +84,6 @@ export const LoginPage: React.FC = () => {
               <span>Sign in with Google Account</span>
               <ArrowRight className="w-4 h-4 text-blue-200 group-hover:translate-x-1 transition-transform duration-200" />
             </button>
-
-            {/* Development Demo Login Button (hidden in production) */}
-            {showDevDemo && (
-              <>
-                <div className="relative py-1 text-center text-xs text-slate-500">
-                  <span className="bg-shield-card px-2 relative z-10 font-mono text-[10px] uppercase text-slate-500">Dev Testing Only</span>
-                  <div className="absolute top-1/2 left-0 right-0 h-px bg-slate-800"></div>
-                </div>
-
-                <Button
-                  variant="secondary"
-                  size="md"
-                  onClick={handleDemoLogin}
-                  className="w-full text-xs font-mono py-2.5 text-blue-400 hover:text-blue-300 border border-blue-500/20"
-                >
-                  <Lock className="w-3.5 h-3.5 mr-2" />
-                  Sign in as Demo Security Analyst
-                </Button>
-              </>
-            )}
           </div>
         </Card>
 
@@ -136,5 +105,6 @@ export const LoginPage: React.FC = () => {
       </div>
     </div>
   );
-
 };
+
+

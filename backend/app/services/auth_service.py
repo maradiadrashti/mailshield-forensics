@@ -33,7 +33,7 @@ class AuthService:
         ]
         scope_str = "%20".join(scopes)
         
-        prompt_val = "consent" if force_consent else "select_account"
+        prompt_val = "consent"
         url = (
             f"https://accounts.google.com/o/oauth2/v2/auth?"
             f"client_id={settings.GOOGLE_CLIENT_ID}&"
@@ -53,6 +53,7 @@ class AuthService:
         stores OAuth token credentials, and issues MailShield JWT session tokens.
         """
         # Isolate Demo Login strictly behind ENABLE_DEV_DEMO flag
+        google_user = None
         if settings.ENABLE_DEV_DEMO and code.startswith("demo_google_auth_code"):
             if "maradiadrashti" in code:
                 google_user = {
@@ -234,119 +235,71 @@ class AuthService:
                 detail="Google OAuth credentials not found for user. Please sign in again."
             )
 
-        # Check token expiration buffer (5 minutes margin)
+        # Demo token handling
+        if token_record.access_token.startswith("demo_"):
+            return token_record.access_token
+
+        # Check token expiration buffer (60 seconds safety margin)
         now_utc = datetime.now(timezone.utc)
         token_exp = token_record.expires_at
         if token_exp and token_exp.tzinfo is None:
             token_exp = token_exp.replace(tzinfo=timezone.utc)
 
-        is_expired = token_exp and (token_exp - timedelta(minutes=5)) <= now_utc
+        is_expired = token_exp is None or (token_exp - timedelta(seconds=60)) <= now_utc
 
-        if force_refresh or is_expired:
-            reason = "forced manual refresh" if force_refresh else f"token expired/nearing expiration (expires_at={token_exp}, now={now_utc})"
-            logger.info(f"Initiating Google token refresh for user ID {user_id} due to {reason}.")
-            
-            # Attempt automatic refresh if refresh_token is present
-            refresh_token = token_record.refresh_token
-            if refresh_token and refresh_token.startswith("demo_") and settings.MOCK_GOOGLE_REFRESH_TOKEN:
-                refresh_token = settings.MOCK_GOOGLE_REFRESH_TOKEN
-                logger.info("Using MOCK_GOOGLE_REFRESH_TOKEN from environment for fallback live sync refresh.")
+        if not force_refresh and not is_expired and token_record.access_token:
+            logger.info("Google token valid — using existing access token")
+            return token_record.access_token
 
-            if not refresh_token:
-                logger.error(f"Google refresh token not found for user ID {user_id}. Deleting invalid token record.")
-                db.delete(token_record)
-                db.commit()
+        # Access token is expired or force_refresh requested
+        refresh_token = token_record.refresh_token
+        if not refresh_token:
+            logger.error("Google refresh failed — reconnect required")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google refresh token not found. Please sign in with Google again."
+            )
+
+        logger.info("Google access token expired — refreshing")
+
+        refresh_payload = {
+            "client_id": settings.GOOGLE_CLIENT_ID,
+            "client_secret": settings.GOOGLE_CLIENT_SECRET,
+            "refresh_token": refresh_token,
+            "grant_type": "refresh_token"
+        }
+
+        try:
+            res = requests.post(GOOGLE_TOKEN_URL, data=refresh_payload, timeout=10)
+        except Exception as net_err:
+            logger.error("Google refresh failed — reconnect required")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=f"Network error refreshing Google access token: {str(net_err)}"
+            )
+
+        if res.status_code == 200:
+            new_data = res.json()
+            new_access_token = new_data.get("access_token")
+            if not new_access_token:
+                logger.error("Google refresh failed — reconnect required")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Google refresh token not found. Please sign in with Google again."
-                )
-            
-            try:
-                client_id = settings.GOOGLE_CLIENT_ID
-                client_secret = settings.GOOGLE_CLIENT_SECRET
-                
-                # If using public OAuth Playground credentials, leverage Google's Playground refresh proxy
-                if (not client_id or not client_secret) and refresh_token.startswith("1//"):
-                    proxy_url = "https://developers.google.com/oauthplayground/refreshAccessToken"
-                    logger.info("Using Google OAuth Playground refresh proxy endpoint.")
-                    res = requests.post(
-                        proxy_url, 
-                        json={"refresh_token": refresh_token}, 
-                        headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"},
-                        timeout=10
-                    )
-                    logger.info(f"Google OAuth Playground proxy response status: {res.status_code}")
-                    if res.status_code == 200:
-                        data = res.json()
-                        if data.get("success") and data.get("access_token"):
-                            new_access_token = data.get("access_token")
-                            token_record.access_token = new_access_token
-                            new_expires_in = data.get("expires_in", 3600)
-                            token_record.expires_at = now_utc + timedelta(seconds=new_expires_in)
-                            db.commit()
-                            logger.info("Successfully refreshed Google access token using OAuth Playground proxy.")
-                            return new_access_token
-                
-                refresh_payload = {
-                    "client_id": client_id,
-                    "client_secret": client_secret,
-                    "refresh_token": refresh_token,
-                    "grant_type": "refresh_token"
-                }
-                logger.info(f"Sending POST request to Google token refresh URL: {GOOGLE_TOKEN_URL}")
-                res = requests.post(GOOGLE_TOKEN_URL, data=refresh_payload, timeout=10)
-                logger.info(f"Google Token URL response status: {res.status_code}")
-                
-                if res.status_code == 200:
-                    new_data = res.json()
-                    new_access_token = new_data.get("access_token")
-                    if not new_access_token:
-                        logger.error("Token refresh response did not contain 'access_token'.")
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="OAuth refresh failed: Google response did not include a new access token."
-                        )
-                    token_record.access_token = new_access_token
-                    if refresh_token == settings.MOCK_GOOGLE_REFRESH_TOKEN:
-                        token_record.refresh_token = refresh_token
-                    new_expires_in = new_data.get("expires_in", 3600)
-                    token_record.expires_at = now_utc + timedelta(seconds=new_expires_in)
-                    db.commit()
-                    logger.info(f"Google Access Token refreshed successfully for user ID {user_id}. New expiry: {token_record.expires_at}")
-                else:
-                    err_json = {}
-                    try:
-                        err_json = res.json()
-                    except Exception:
-                        pass
-                    err_msg = err_json.get("error", "")
-                    err_desc = err_json.get("error_description", "")
-                    logger.error(f"Failed to refresh Google Access Token: Status={res.status_code}, Error={err_msg}, Description={err_desc}")
-                    
-                    if res.status_code in (400, 401) or err_msg == "invalid_grant":
-                        # Clear invalid tokens from database
-                        db.delete(token_record)
-                        db.commit()
-                        logger.warning(f"Deleted invalid OAuth credentials for user ID {user_id} due to invalid grant error.")
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail="Google account authorization has been revoked or expired. Please sign in with Google again."
-                        )
-                    else:
-                        raise HTTPException(
-                            status_code=status.HTTP_401_UNAUTHORIZED,
-                            detail=f"Google token refresh failed: {err_msg} ({err_desc})"
-                        )
-            except HTTPException:
-                raise
-            except Exception as e:
-                logger.exception(f"Failed to refresh Google Access Token automatically: {e}")
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail=f"Failed to refresh Google access token: {str(e)}"
+                    detail="OAuth refresh failed: Google response did not include a new access token."
                 )
 
-        return token_record.access_token
+            token_record.access_token = new_access_token
+            new_expires_in = new_data.get("expires_in", 3600)
+            token_record.expires_at = now_utc + timedelta(seconds=new_expires_in)
+            db.commit()
+            logger.info("Google access token refreshed successfully")
+            return new_access_token
+        else:
+            logger.error("Google refresh failed — reconnect required")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Google account authorization has been revoked or expired. Please sign in with Google again."
+            )
 
     @classmethod
     def refresh_access_token(cls, db: Session, refresh_token: str) -> TokenResponse:

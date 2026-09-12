@@ -3,8 +3,8 @@ import { Navbar } from '../components/layout/Navbar';
 
 interface MainLayoutProps {
   children: React.ReactNode;
-  currentTab?: 'dashboard' | 'inbox' | 'trusted';
-  onTabChange?: (tab: 'dashboard' | 'inbox' | 'trusted') => void;
+  currentTab?: 'dashboard' | 'inbox' | 'forensics' | 'trusted';
+  onTabChange?: (tab: 'dashboard' | 'inbox' | 'forensics' | 'trusted') => void;
 }
 
 export const MainLayout: React.FC<MainLayoutProps> = ({ children, currentTab, onTabChange }) => {
@@ -15,7 +15,7 @@ export const MainLayout: React.FC<MainLayoutProps> = ({ children, currentTab, on
         {children}
       </main>
       <footer className="border-t border-shield-border/60 py-6 text-center text-xs text-slate-500">
-        <p>MailShield AI &copy; {new Date().getFullYear()} - Enterprise AI Threat Detection Platform</p>
+        <p>MailShield Forensics &copy; {new Date().getFullYear()} - AI-Powered Email Threat Detection & Forensic Intelligence</p>
       </footer>
     </div>
   );

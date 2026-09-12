@@ -35,12 +35,25 @@ dist/
 dist-ssr/
 *.local
 
-# Environment variables
+# Environment variables & Tokens
 .env
 !.env.example
+gmail_token.txt
+*.token
+*.pem
+*.key
 
-# IDE / OS
+# Databases & Geo Data
+*.db
+*.sqlite
+*.sqlite3
+backend/mailshield.db
+*.mmdb
+backend/data/geolite/
+
+# IDE / OS / Archives
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+*.zip
