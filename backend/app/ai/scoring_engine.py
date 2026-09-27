@@ -62,6 +62,18 @@ SAFE_DOMAINS_WHITELIST = [
     "bmsit.in", "bmsit.ac.in", "kalantarart.org"
 ]
 
+# Legitimate bounce/ESP domains — return-path mismatches from these are NOT spoofing
+LEGITIMATE_ESP_DOMAINS = [
+    "bnc", "bounce", "mailchimp", "sendgrid", "amazonses", "google",
+    "postmark", "zendesk", "freshdesk", "hubspot", "salesforce",
+    "constantcontact", "campaignmonitor", "mailgun", "sparkpost"
+]
+
+# Legitimate reply-to service domains
+LEGITIMATE_REPLY_DOMAINS = [
+    "zendesk", "freshdesk", "google", "microsoft", "gmail", "googlegroups"
+]
+
 
 class ScoringEngine:
     CANDIDATE_LABELS = [
@@ -181,10 +193,10 @@ class ScoringEngine:
         if links:
             url_max_score, url_reports, url_reasons, url_recs = URLAnalyzer.analyze_urls(links)
             url_risk = url_max_score
+            layer_details["url_findings"] = url_reports
             for u_rep in url_reports:
                 u_score = u_rep.get("risk_score", 0)
-                u_host = u_rep.get("hostname", "")
-                if u_score >= 80:
+                if u_score >= 60:  # Threshold: flag suspicious URLs (60+), not just critical (80+)
                     layer_details["has_suspicious_url"] = True
                     for r in u_rep.get("reasons", []):
                         if r not in layer_signals:
@@ -242,8 +254,17 @@ class ScoringEngine:
 
         layer_details["misinfo_risk"] = misinfo_risk
 
-        # Layer 1 Risk is the highest genuine threat vector identified in content
-        layer1_risk = max(attachment_risk, url_risk, content_risk, misinfo_risk)
+        # Layer 1 Composite: primary threat vector wins, secondary vectors add 15% bonus corroboration
+        primary_risk = max(attachment_risk, url_risk)
+        secondary_risk = max(content_risk, misinfo_risk)
+        if primary_risk > 0 and secondary_risk > 0:
+            layer1_risk = min(100, primary_risk + int(secondary_risk * 0.15))
+        elif primary_risk > 0:
+            layer1_risk = primary_risk
+        elif secondary_risk > 0:
+            layer1_risk = secondary_risk
+        else:
+            layer1_risk = 0
 
         layer_details["attachment_risk"] = attachment_risk
         layer_details["url_risk"] = url_risk
@@ -309,24 +330,39 @@ class ScoringEngine:
         auth_summary = f"SPF: {spf.upper()}, DKIM: {dkim.upper()}, DMARC: {dmarc.upper()}"
         layer_signals.append(auth_summary)
 
-        # SPF or DKIM Hard Fail is a cryptographic failure indicating spoofing
-        if spf == "fail" or dkim == "fail" or dmarc == "fail":
-            auth_risk = 70
-            signal = f"Cryptographic authentication failure: {auth_summary}"
+        # Tiered auth failure: dual fail is strongest cryptographic spoofing indicator
+        if spf == "fail" and dkim == "fail":
+            auth_risk = 90
+            signal = f"Both SPF and DKIM failed — strong cryptographic spoofing indicator: {auth_summary}"
             layer_signals.append(signal)
-            reasons.append("Cryptographic authentication failed (SPF, DKIM, or DMARC Fail)")
-            recommendations.append("Email failed sender authentication. Domain identity cannot be cryptographically verified.")
+            reasons.append("Dual authentication failure (SPF+DKIM fail) — strong spoofing signal")
+            recommendations.append("Email failed both SPF and DKIM. Domain identity unverifiable — treat as spoofed.")
+            layer_details["has_header_spoofing"] = True
+        elif spf == "fail" or dkim == "fail":
+            auth_risk = 70
+            failing = "SPF" if spf == "fail" else "DKIM"
+            signal = f"{failing} authentication failed: {auth_summary}"
+            layer_signals.append(signal)
+            reasons.append(f"Cryptographic authentication failure ({failing} fail)")
+            recommendations.append(f"Email failed {failing} authentication. Sender domain may be spoofed.")
+            layer_details["has_header_spoofing"] = True
+        elif dmarc == "fail":
+            auth_risk = 60
+            layer_signals.append(f"DMARC policy failure detected: {auth_summary}")
+            reasons.append("DMARC policy failure — domain alignment check failed")
             layer_details["has_header_spoofing"] = True
         elif spf == "pass" and dkim == "pass":
-            # BENIGN: 0 risk!
+            # Fully authenticated — 0 auth risk
             auth_risk = 0
+            layer_signals.append("Sender fully authenticated (SPF pass + DKIM pass)")
         elif spf == "pass" or dkim == "pass":
-            # Passing SPF or DKIM = 0 risk
-            auth_risk = 0
+            # Partial pass — minimal concern
+            auth_risk = 5
+            layer_signals.append(f"Partial authentication: {auth_summary}")
         else:
-            # Sub-optimal alignment (none/unknown/neutral) on standard email is low uncertainty, not critical threat
+            # Neither passed — minor uncertainty
             auth_risk = 15
-            signal = "Sub-optimal authentication alignment: missing or neutral DKIM/DMARC records"
+            signal = "Incomplete authentication records (SPF/DKIM unknown or neutral)"
             layer_signals.append(signal)
 
         # --- B. Received Hops & Routing ---
@@ -343,58 +379,81 @@ class ScoringEngine:
 
             layer_signals.append(f"Origin IP candidate: {ip_val} ({country_val})")
 
-            # Check for genuine bulletproof / Tor / VPN exit node infrastructure
-            is_vpn_tor = "vpn" in vpn_val or "tor" in vpn_val or "vpn" in isp_val or "tor" in isp_val
-            is_bulletproof = any(w in isp_val for w in ["bulletproof", "m247", "packethub", "darknet"])
+            # Only flag genuine anonymization infrastructure — NOT normal cloud hosting or email providers
+            # Gmail, Google Cloud, AWS SES, Microsoft are all legitimate email routing infrastructure
+            is_vpn_tor = (
+                "vpn detected" in vpn_val
+                or "tor" in vpn_val
+                or any(w in isp_val for w in ["mullvad", "nordvpn", "expressvpn", "proton vpn", "torproject"])
+            )
+            is_bulletproof = any(w in isp_val for w in ["bulletproof", "packethub", "darknet", "m247"])
 
-            if is_vpn_tor or is_bulletproof:
+            if is_vpn_tor:
                 routing_risk = 60
-                signal = "Anonymized transport route detected (VPN/Tor exit or bulletproof hosting provider)"
+                signal = f"VPN/Tor anonymized routing detected from IP {ip_val}"
+                layer_signals.append(signal)
+                reasons.append(signal)
+                layer_details["has_impersonation"] = True
+            elif is_bulletproof:
+                routing_risk = 50
+                signal = f"Bulletproof/abusive hosting provider detected: {network_intelligence.isp}"
                 layer_signals.append(signal)
                 reasons.append(signal)
                 layer_details["has_impersonation"] = True
             else:
-                # Normal public cloud / residential / ISP IP is NEUTRAL = 0 risk!
+                # Normal ISP, cloud, or residential IP = 0 routing risk
                 routing_risk = 0
 
-        # --- C. Header Inconsistencies & Impersonation ---
+        # --- C. Header Inconsistencies & Envelope Spoofing ---
         if raw_headers:
             header_map = {str(h.get("name", "")).lower(): str(h.get("value", "")) for h in raw_headers}
             from_hdr = header_map.get("from", "").lower()
             return_path = header_map.get("return-path", "").lower()
             reply_to = header_map.get("reply-to", "").lower()
 
+            def _extract_domain(addr: str) -> str:
+                """Correctly extract domain from RFC 5322 'Name <user@domain>' or bare addresses."""
+                if "<" in addr and ">" in addr:
+                    addr = addr.split("<")[1].split(">")[0]
+                if "@" in addr:
+                    return addr.split("@")[-1].strip().rstrip(">").strip()
+                return ""
+
+            from_domain = _extract_domain(from_hdr)
+            rp_domain = _extract_domain(return_path)
+            reply_domain = _extract_domain(reply_to)
+
             # Check Return-Path vs From domain mismatch
-            if return_path and from_hdr:
-                from_domain = from_hdr.split("@")[-1].strip(">").strip() if "@" in from_hdr else ""
-                rp_domain = return_path.split("@")[-1].strip(">").strip() if "@" in return_path else ""
-                if from_domain and rp_domain and from_domain != rp_domain:
-                    # Ignore legitimate email service providers and bounce handlers
-                    is_legit_esp = any(b in rp_domain for b in [
-                        "bnc", "bounce", "mailchimp", "sendgrid", "amazonses", "google",
-                        "postmark", "zendesk", "freshdesk", "hubspot", "salesforce"
-                    ])
-                    if not is_legit_esp:
-                        header_risk = 50
-                        signal = f"Return-Path domain mismatch: claims '{from_domain}' but returns to '{rp_domain}'"
-                        layer_signals.append(signal)
-                        reasons.append(signal)
-                        layer_details["has_header_spoofing"] = True
+            if from_domain and rp_domain and from_domain != rp_domain:
+                if not any(b in rp_domain for b in LEGITIMATE_ESP_DOMAINS):
+                    header_risk = max(header_risk, 50)
+                    signal = f"Return-Path domain mismatch: From '{from_domain}' but bounces to '{rp_domain}'"
+                    layer_signals.append(signal)
+                    reasons.append(signal)
+                    recommendations.append("Return-Path domain differs from sender — possible spoofing.")
+                    layer_details["has_header_spoofing"] = True
 
-            # Check Reply-To diversion
-            if reply_to and from_hdr:
-                from_domain = from_hdr.split("@")[-1].strip(">").strip() if "@" in from_hdr else ""
-                reply_domain = reply_to.split("@")[-1].strip(">").strip() if "@" in reply_to else ""
-                if from_domain and reply_domain and from_domain != reply_domain:
-                    is_legit_reply = any(b in reply_domain for b in ["zendesk", "freshdesk", "google", "microsoft"])
-                    if not is_legit_reply:
-                        header_risk = max(header_risk, 45)
-                        signal = f"Reply-To diversion: replies redirect to external domain '{reply_domain}'"
-                        layer_signals.append(signal)
-                        reasons.append(signal)
-                        layer_details["has_impersonation"] = True
+            # Check Reply-To diversion — replies being silently redirected to attacker
+            if from_domain and reply_domain and from_domain != reply_domain:
+                if not any(b in reply_domain for b in LEGITIMATE_REPLY_DOMAINS):
+                    header_risk = max(header_risk, 55)
+                    signal = f"Reply-To diversion: replies redirected to external domain '{reply_domain}'"
+                    layer_signals.append(signal)
+                    reasons.append(signal)
+                    recommendations.append(f"CAUTION: Replies go to '{reply_domain}', not the sender's domain.")
+                    layer_details["has_impersonation"] = True
 
-        layer2_risk = min(100, max(auth_risk, routing_risk, header_risk))
+        # Composite Layer 2: auth(50%) + header(30%) + routing(20%)
+        # Auth is most forensically definitive, header mismatches secondary, routing tertiary
+        layer2_risk = min(
+            100,
+            int(auth_risk * 0.50) + int(header_risk * 0.30) + int(routing_risk * 0.20)
+        )
+        # Floor enforcement: high individual vectors guarantee minimum layer score
+        if auth_risk >= 70 or header_risk >= 55:
+            layer2_risk = max(layer2_risk, 50)
+        if routing_risk >= 60:
+            layer2_risk = max(layer2_risk, 40)
 
         layer_details["auth_risk"] = auth_risk
         layer_details["routing_risk"] = routing_risk
@@ -532,21 +591,28 @@ class ScoringEngine:
                 layer_details["has_behavioral_anomaly"] = True
 
         # ------------------------------------------------------------------
-        # 3. Attachment Baseline Behavioral Anomaly
+        # 3. Attachment Baseline Behavioral Anomaly (requires 3+ emails for reliable baseline)
         # ------------------------------------------------------------------
         current_att_count = len(attachments or [])
-        if history_count >= 2 and current_att_count > 0:
-            hist_att_count = sum(len(getattr(h, 'attachments', []) or []) for h in history_list)
+        if history_count >= 3 and current_att_count > 0:
+            hist_att_count = 0
+            for h in history_list:
+                hist_atts = getattr(h, "attachments", None)
+                if hist_atts and isinstance(hist_atts, list):
+                    hist_att_count += len(hist_atts)
             if hist_att_count == 0:
                 att_sig = (
                     f"Unprecedented attachment: sender has 0 attachments across {history_count} prior emails, "
-                    f"but current email contains {current_att_count} attachment(s)"
+                    f"but now delivers {current_att_count} file(s)"
                 )
                 layer_signals.append(att_sig)
                 reasons.append(att_sig)
-                recommendations.append("Sender has never sent attachments in prior communications. Exercise caution before opening files.")
+                recommendations.append("Sender has never sent attachments before. Heightened caution before opening files.")
                 layer3_risk = max(layer3_risk, 45)
                 layer_details["has_behavioral_anomaly"] = True
+                layer_details["attachment_anomaly"] = {
+                    "current_count": current_att_count, "historical_count": 0, "history_emails": history_count
+                }
 
         # ------------------------------------------------------------------
         # 4. Link / Destination Domain Novelty Anomaly
@@ -562,13 +628,15 @@ class ScoringEngine:
                     pass
             hist_domains = set()
             for h in history_list:
-                for u in (getattr(h, 'links', []) or []):
-                    try:
-                        loc = urlparse(u).netloc.lower()
-                        if loc:
-                            hist_domains.add(loc)
-                    except Exception:
-                        pass
+                hist_links = getattr(h, "links", None)
+                if hist_links and isinstance(hist_links, list):
+                    for u in hist_links:
+                        try:
+                            loc = urlparse(u).netloc.lower()
+                            if loc:
+                                hist_domains.add(loc)
+                        except Exception:
+                            pass
             novel_domains = [
                 d for d in current_domains
                 if d not in hist_domains and not URLAnalyzer.is_known_safe_infrastructure(d)
@@ -729,11 +797,13 @@ class ScoringEngine:
         weighted_score = (l1_risk * 0.45) + (l2_risk * 0.20) + (l3_risk * 0.35)
         overall_score = min(100, max(0, int(round(weighted_score))))
 
-        # Confidence
-        if l3_details.get("has_history"):
+        # Confidence: highest when we have analyzed historical baseline, lowest for first-time senders
+        if l3_details.get("historical_analyzed_count", 0) >= 3:
+            base_confidence = 0.97
+        elif l3_details.get("has_history"):
             base_confidence = 0.95
         elif is_trusted_or_whitelisted:
-            base_confidence = 0.94
+            base_confidence = 0.93
         else:
             base_confidence = 0.88
 
@@ -743,52 +813,55 @@ class ScoringEngine:
         elif overall_score >= 50:
             severity = "high"
         elif overall_score >= 25:
-            severity = "low"
+            severity = "medium"
         else:
             severity = "safe"
 
         # ------------------------------------------------------------------
-        # DYNAMIC EVIDENCE-BASED PRIMARY VERDICT
+        # EVIDENCE-BASED PRIMARY VERDICT (priority chain: BEC > Payload > Auth > Behavioral)
         # ------------------------------------------------------------------
-        if overall_score < 25:
+        if overall_score < 20:
             verdict = "No Significant Threat Detected"
+        elif l3_details.get("has_impersonation_anomaly"):
+            verdict = "Executive Impersonation (BEC)"
+        elif l1_details.get("has_suspicious_attachment"):
+            verdict = "Malicious Attachment Detected"
+        elif l1_details.get("has_suspicious_url"):
+            verdict = "Suspicious URL / Phishing Link"
+        elif l2_details.get("has_header_spoofing") and l2_details.get("auth_risk", 0) >= 70:
+            verdict = "Email Authentication Spoofing"
+        elif l1_details.get("has_misinformation"):
+            verdict = "Misinformation / Fraud Content"
+        elif l2_details.get("has_impersonation") or l2_details.get("has_header_spoofing"):
+            verdict = "Header / Envelope Spoofing"
+        elif l3_details.get("urgency_spike"):
+            verdict = "Behavioral Anomaly — Urgency Spike"
+        elif l3_details.get("has_behavioral_anomaly"):
+            verdict = "Sender Behavior Anomaly"
+        elif l1_details.get("has_credential_phishing"):
+            verdict = "Credential Phishing Attempt"
+        elif overall_score >= 75:
+            verdict = "Critical Threat"
+        elif overall_score >= 50:
+            verdict = "Suspicious Email"
         else:
-            if l3_details.get("has_impersonation_anomaly"):
-                verdict = "Executive Impersonation (BEC)"
-            elif l1_details.get("has_suspicious_attachment"):
-                verdict = "Malicious Attachment Detected"
-            elif l1_details.get("has_suspicious_url"):
-                verdict = "Suspicious URL Detected"
-            elif l1_details.get("has_misinformation"):
-                verdict = "Misinformation & Fraud Detected"
-            elif l2_details.get("has_impersonation") or l2_details.get("has_header_spoofing"):
-                verdict = "Header Spoofing / Impersonation"
-            elif l3_details.get("has_behavioral_anomaly"):
-                verdict = "Sender Behavior Anomaly"
-            elif l1_details.get("has_credential_phishing") or (l1_risk >= 60 and l2_risk >= 50):
-                verdict = "Phishing"
-            elif overall_score >= 75:
-                verdict = "Critical Threat"
-            elif overall_score >= 50:
-                verdict = "Suspicious Email"
-            else:
-                verdict = "Low Risk Suspicious"
+            verdict = "Low Risk Suspicious"
 
         threat_type = verdict
 
         if not recommendations:
             recommendations.append("Email appears clean. Standard browsing caution applies.")
 
-        # Compute layer point contributions for UI breakdown:
-        # Layer 1 max: 40 pts, Layer 2 max: 25 pts, Layer 3 max: 35 pts
-        l1_ui_score = int(round(l1_risk * 0.40))
-        l2_ui_score = int(round(l2_risk * 0.25))
-        l3_ui_score = int(round(l3_risk * 0.35))
+        # UI breakdown scores — MUST match the composite formula weights exactly (45/20/35)
+        # L1 max contribution: 45 pts | L2 max: 20 pts | L3 max: 35 pts  (total: 100)
+        l1_ui_score = int(round(l1_risk * 0.45))   # Max 45
+        l2_ui_score = int(round(l2_risk * 0.20))   # Max 20
+        l3_ui_score = int(round(l3_risk * 0.35))   # Max 35
 
         layers_breakdown = {
             "content_security": {
                 "score": l1_ui_score,
-                "max_score": 40,
+                "max_score": 45,
                 "risk": l1_risk,
                 "status": l1_details["status"],
                 "signals": l1_signals,
@@ -796,7 +869,7 @@ class ScoringEngine:
             },
             "transport_forensics": {
                 "score": l2_ui_score,
-                "max_score": 25,
+                "max_score": 20,
                 "risk": l2_risk,
                 "status": l2_details["status"],
                 "signals": l2_signals,
@@ -815,18 +888,27 @@ class ScoringEngine:
             }
         }
 
-        # Calculate actual metric category scores
-        misinfo_subscore = int(round(l1_details.get("misinfo_risk", 0) * 0.40))
-        phishing_subscore = l1_ui_score if l1_details.get("has_credential_phishing") or l1_details.get("has_suspicious_url") else 0
-        scam_subscore = l2_ui_score if l2_details.get("has_impersonation") or l2_details.get("has_header_spoofing") else 0
-        social_subscore = l3_ui_score if l3_details.get("has_behavioral_anomaly") else 0
+        # Threat category subscores — each reflects its actual forensic weight contribution
+        phishing_subscore = (
+            int(round(max(l1_details.get("url_risk", 0), l1_details.get("content_risk", 0)) * 0.45))
+            if (l1_details.get("has_credential_phishing") or l1_details.get("has_suspicious_url")) else 0
+        )
+        scam_subscore = (
+            l2_ui_score
+            if (l2_details.get("has_impersonation") or l2_details.get("has_header_spoofing")) else 0
+        )
+        misinfo_subscore = int(round(l1_details.get("misinfo_risk", 0) * 0.45))
+        social_subscore = (
+            l3_ui_score
+            if (l3_details.get("has_behavioral_anomaly") or l3_details.get("has_impersonation_anomaly")) else 0
+        )
 
         breakdown = {
             "auth_score": l2_ui_score,
-            "geo_score": int(round(l2_details.get("routing_risk", 0) * 0.25)),
-            "url_score": int(round(l1_details.get("url_risk", 0) * 0.40)),
+            "geo_score": int(round(l2_details.get("routing_risk", 0) * 0.20)),
+            "url_score": int(round(l1_details.get("url_risk", 0) * 0.45)),
             "nlp_score": l3_ui_score,
-            "header_score": l2_ui_score,
+            "header_score": int(round(l2_details.get("header_risk", 0) * 0.20)),
 
             "layers": layers_breakdown,
             "verdict": verdict,
@@ -835,12 +917,17 @@ class ScoringEngine:
             "phishing_score": phishing_subscore,
             "scam_score": scam_subscore,
             "misinformation_score": misinfo_subscore,
-            "social_engineering_score": social_subscore
+            "social_engineering_score": social_subscore,
+
+            # Raw layer scores stored for debugging/transparency
+            "layer1_risk": l1_risk,
+            "layer2_risk": l2_risk,
+            "layer3_risk": l3_risk,
+            "weighted_score": round(weighted_score, 2)
         }
 
         unique_reasons = list(dict.fromkeys(reasons))
         unique_recs = list(dict.fromkeys(recommendations))
-        _, url_reports, _, _ = URLAnalyzer.analyze_urls(links or [])
 
         return {
             "risk_score": overall_score,
@@ -852,5 +939,6 @@ class ScoringEngine:
             "recommendations": unique_recs,
             "breakdown": breakdown,
             "layers": layers_breakdown,
-            "url_reports": url_reports
+            # Reuse url_findings from Layer 1 (already computed — no duplicate API call)
+            "url_reports": l1_details.get("url_findings", [])
         }
