@@ -27,20 +27,25 @@ async def lifespan(app: FastAPI):
     # Startup: Initialize database tables
     try:
         init_db()
+        print(f"[MailShield] Database initialized successfully ({settings.DATABASE_URL})")
     except Exception as e:
-        print(f"Warning: Database initialization error: {e}")
+        print(f"[MailShield] Warning: Database initialization error: {e}")
 
     # Start background Gmail sync worker (polls every 30 seconds)
     sync_worker_task = asyncio.create_task(periodic_gmail_sync_loop(interval_seconds=30))
+    print("[MailShield] Background Gmail sync worker started (30s interval)")
+    print(f"[MailShield] API server running at {settings.BACKEND_URL}{settings.API_V1_STR}")
 
     yield
 
     # Graceful shutdown
+    print("[MailShield] Shutting down services...")
     sync_worker_task.cancel()
     try:
         await sync_worker_task
     except asyncio.CancelledError:
         pass
+    print("[MailShield] Graceful shutdown complete.")
 
 
 app = FastAPI(

@@ -1,8 +1,14 @@
 import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
-import geoip2.database
-from geoip2.errors import AddressNotFoundError
+try:
+    import geoip2.database
+    from geoip2.errors import AddressNotFoundError
+    HAS_GEOIP2 = True
+except ImportError:
+    HAS_GEOIP2 = False
+    geoip2 = None
+    AddressNotFoundError = Exception
 from app.core.config import BASE_DIR
 
 logger = logging.getLogger("mailshield.geo")
@@ -35,6 +41,8 @@ class GeoService:
 
     @classmethod
     def get_city_reader(cls):
+        if not HAS_GEOIP2:
+            return None
         if cls._city_reader is None:
             db_path = BASE_DIR / "data" / "geolite" / "GeoLite2-City.mmdb"
             if db_path.exists():
@@ -48,6 +56,8 @@ class GeoService:
 
     @classmethod
     def get_asn_reader(cls):
+        if not HAS_GEOIP2:
+            return None
         if cls._asn_reader is None:
             db_path = BASE_DIR / "data" / "geolite" / "GeoLite2-ASN.mmdb"
             if db_path.exists():

@@ -12,4 +12,5 @@ requests>=2.31.0
 pillow>=10.2.0
 python-multipart>=0.0.9
 reportlab>=5.0.0
+geoip2>=4.8.0
 

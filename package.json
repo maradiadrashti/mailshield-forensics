@@ -1,0 +1,26 @@
+{
+  "name": "mailshield-ai",
+  "version": "1.0.0",
+  "description": "MailShield AI — Enterprise AI Cybersecurity & Email Forensics Platform",
+  "private": true,
+  "scripts": {
+    "start": "python start.py",
+    "dev": "python start.py",
+    "dev:nobrowser": "python start.py --no-browser",
+    "dev:backend": "python start.py --backend-only",
+    "dev:frontend": "python start.py --frontend-only",
+    "build": "npm run build --prefix frontend",
+    "lint:frontend": "npm run lint --prefix frontend"
+  },
+  "keywords": [
+    "cybersecurity",
+    "email-forensics",
+    "phishing-detection",
+    "ai",
+    "fastapi",
+    "react",
+    "vite"
+  ],
+  "author": "MailShield AI Team",
+  "license": "MIT"
+}

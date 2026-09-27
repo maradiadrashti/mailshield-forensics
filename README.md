@@ -30,46 +30,70 @@
 
 ---
 
-## 🚀 Quick Start (Local Setup)
+## 🚀 Quick Start (One-Command Clean Startup)
 
-No database installation (like PostgreSQL) or Docker is required. SQLite is built into Python and initializes automatically.
+No manual database setup or separate terminals required. Everything (virtualenv, dependency checks, port validation, database initialization, and process management) runs cleanly in a single command.
 
 ### 1. Prerequisites
-- Python 3.11+
-- Node.js 18+
-- SQLite (built into Python)
+- **Python 3.10+** (with SQLite built-in)
+- **Node.js 18+** & **npm**
 
-### 2. Environment Setup
-Create `.env` file in the `backend/` directory (or copy `.env.example`):
+### 2. Launch MailShield AI
+
+Choose any method based on your preferred workflow:
+
+#### Option A: Unified Python Launcher (Cross-Platform)
 ```bash
-cp backend/.env.example backend/.env
+python start.py
 ```
 
-### 3. Backend Setup & Launch
-```bash
-cd backend
-pip install -r requirements.txt
-
-# Run Alembic migrations (optional, init_db automatically creates tables)
-alembic upgrade head
-
-# Start FastAPI dev server using any of the following commands:
-python app/main.py
-# OR
-python -m app.main
-# OR
-uvicorn app.main:app --reload
+#### Option B: Windows PowerShell
+```powershell
+.\start.ps1
 ```
-FastAPI server starts at `http://localhost:8000`. OpenAPI docs available at `http://localhost:8000/docs`.
 
-### 4. Frontend Setup & Launch
-In a new terminal:
+#### Option C: Windows Batch File (Double-Clickable)
+Double-click `start.bat` or run:
+```cmd
+start.bat
+```
+
+#### Option D: NPM
 ```bash
-cd frontend
-npm install
+npm start
+# or
 npm run dev
 ```
-React application starts at `http://localhost:5173` (or `http://localhost:3000`).
+
+#### Option E: macOS / Linux / WSL / Git Bash
+```bash
+chmod +x start.sh
+./start.sh
+```
+
+---
+
+### ⚙️ Startup Options & Flags
+
+| Flag | Description |
+| :--- | :--- |
+| `--no-browser` | Prevent automatic opening of the web browser |
+| `--backend-only` | Run only the FastAPI backend service |
+| `--frontend-only` | Run only the Vite React frontend service |
+| `--kill-stale` | Automatically terminate any lingering processes holding port `8000` or `3000` |
+| `--install` | Force reinstall/update backend and frontend dependencies |
+
+---
+
+### 🌐 Access Endpoints
+
+Once started, the following services are live:
+- **Frontend Cybersecurity Dashboard**: `http://localhost:3000`
+- **Backend API Root**: `http://localhost:8000/api/v1`
+- **Interactive OpenAPI/Swagger Docs**: `http://localhost:8000/docs`
+- **Application Health Diagnostics**: `http://localhost:8000/api/v1/health`
+
+Press `Ctrl + C` in the terminal anytime to cleanly and gracefully shut down both services without orphaned background processes.
 
 ---
 

@@ -37,8 +37,12 @@ dist-ssr/
 
 # Environment variables & Tokens
 .env
+.env.*
 !.env.example
+*.env
 gmail_token.txt
+**/gmail_token.txt
+*token*.txt
 *.token
 *.pem
 *.key
