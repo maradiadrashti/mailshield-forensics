@@ -203,9 +203,9 @@ def check_environment(auto_install: bool = False, kill_stale: bool = False):
         log_info("Frontend node_modules missing. Running npm install...")
         subprocess.run(["npm", "install"], cwd=str(FRONTEND_DIR), shell=True, check=True)
 
-    # 8. Check Ports
-    check_and_clear_port(8000, "FastAPI Backend", auto_kill=kill_stale)
-    check_and_clear_port(3000, "Vite Frontend", auto_kill=kill_stale)
+    # 8. Check and clear ports automatically
+    check_and_clear_port(8000, "FastAPI Backend", auto_kill=True)
+    check_and_clear_port(3000, "Vite Frontend", auto_kill=True)
 
     log_info("Pre-flight checks completed successfully!\n")
 
@@ -275,7 +275,7 @@ def main():
     args = parser.parse_args()
 
     print_banner()
-    check_environment(auto_install=args.install, kill_stale=args.kill_stale)
+    check_environment(auto_install=args.install, kill_stale=True)
 
     processes = []
     venv_py = get_venv_python()
@@ -310,7 +310,6 @@ def main():
     # 1. Start Backend
     if not args.frontend_only:
         log_info(f"Starting FastAPI Backend Server on {BOLD}http://localhost:8000{RESET} (background)...")
-        log_level = "info" if args.verbose else "warning"
         backend_cmd = [
             str(venv_py),
             "-m", "uvicorn",
@@ -319,7 +318,7 @@ def main():
             "--port", "8000",
             "--reload",
             "--reload-dir", "app",
-            "--log-level", log_level
+            "--log-level", "info"
         ]
         
         backend_proc = subprocess.Popen(
