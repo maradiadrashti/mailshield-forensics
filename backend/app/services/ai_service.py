@@ -83,15 +83,40 @@ class AIService:
 
         # Query historical emails from the same sender in database (excluding current email)
         historical_emails = []
+        historical_results = []
+        impersonation_candidates = []
         try:
             historical_emails = db.query(EmailMessage).filter(
                 EmailMessage.user_id == user.id,
                 EmailMessage.id != email.id,
                 (EmailMessage.sender.ilike(f"%{clean_sender_email}%") | (EmailMessage.sender == email.sender))
             ).order_by(EmailMessage.date.desc()).limit(25).all()
+
+            # Query previous analysis results for this sender's prior emails to establish baseline risk
+            if historical_emails:
+                hist_ids = [h.id for h in historical_emails]
+                historical_results = db.query(AnalysisResult).filter(
+                    AnalysisResult.user_id == user.id,
+                    AnalysisResult.email_id.in_(hist_ids)
+                ).all()
+
+            # Real-time Display Name Impersonation / BEC detection:
+            # Check if this display name was historically associated with a different email address
+            raw_sender = email.sender or ""
+            if "<" in raw_sender and ">" in raw_sender:
+                disp_name = raw_sender.split("<")[0].strip().strip('"').strip("'")
+                if len(disp_name) >= 3 and "@" not in disp_name:
+                    impersonation_candidates = db.query(EmailMessage).filter(
+                        EmailMessage.user_id == user.id,
+                        EmailMessage.id != email.id,
+                        EmailMessage.sender.ilike(f"{disp_name}%"),
+                        ~EmailMessage.sender.ilike(f"%{clean_sender_email}%")
+                    ).limit(5).all()
         except Exception as e:
-            logger.warning(f"Could not fetch historical emails for sender '{email.sender}': {e}")
+            logger.warning(f"Could not fetch historical baseline for sender '{email.sender}': {e}")
             historical_emails = []
+            historical_results = []
+            impersonation_candidates = []
 
         # Run AI & Scoring Engine Analysis (3-Layer Explainable Engine)
         analysis_data = ScoringEngine.analyze_email(
@@ -107,7 +132,9 @@ class AIService:
             route_hops=forensic_res.route_hops,
             received_chain=forensic_res.received_chain,
             raw_headers=raw_headers,
-            historical_emails=historical_emails
+            historical_emails=historical_emails,
+            historical_results=historical_results,
+            impersonation_candidates=impersonation_candidates
         )
 
         if existing_result:

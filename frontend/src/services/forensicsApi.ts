@@ -30,4 +30,12 @@ export const forensicsApi = {
     const response = await apiClient.get<Investigation>(`/forensics/investigations/${investigationId}`);
     return response.data;
   },
+
+  downloadReport: async (emailId: string): Promise<Blob> => {
+    const response = await apiClient.get(`/forensics/emails/${emailId}/report`, {
+      responseType: 'blob',
+    });
+    return response.data;
+  },
 };
+

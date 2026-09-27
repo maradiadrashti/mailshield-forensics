@@ -84,7 +84,6 @@ export const InvestigationDetailPage: React.FC<InvestigationDetailPageProps> = (
   investigationId,
   onBack,
 }) => {
-  const [showReportModal, setShowReportModal] = useState(false);
   const [showRawAuth, setShowRawAuth] = useState(false);
 
   // Forensic header data state
@@ -321,8 +320,7 @@ export const InvestigationDetailPage: React.FC<InvestigationDetailPageProps> = (
           </div>
         ) : (
           <div className="p-3.5 rounded-xl bg-slate-950/40 border border-slate-800/80 text-center text-xs text-slate-400 font-sans">
-            {/* TODO: backend integration required */}
-            Detailed behavioral signal breakdown will appear here as additional modules are activated.
+            No threat indicators or anomalies were detected. All content, transport, and behavioral signals verified clean.
           </div>
         )}
       </Card>
@@ -812,47 +810,6 @@ export const InvestigationDetailPage: React.FC<InvestigationDetailPageProps> = (
           </p>
         </Card>
       </div>
-
-      {/* Forensic Report Modal Notice */}
-      {showReportModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-in fade-in duration-200">
-          <div className="glass-panel w-full max-w-md rounded-2xl border border-slate-700/80 p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between border-b border-slate-800 pb-3">
-              <div className="flex items-center space-x-2 text-cyan-400">
-                <FileText className="w-5 h-5" />
-                <h3 className="text-base font-bold text-white">Forensic Report Generator</h3>
-              </div>
-              <button
-                onClick={() => setShowReportModal(false)}
-                className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <div className="py-2 space-y-2 text-center">
-              <div className="w-12 h-12 rounded-2xl bg-cyan-500/10 border border-cyan-500/30 text-cyan-400 flex items-center justify-center mx-auto mb-3">
-                <FileText className="w-6 h-6 animate-pulse" />
-              </div>
-              <p className="text-xs text-slate-300 leading-relaxed font-sans">
-                Forensic report generation will be available after backend report generation is connected.
-              </p>
-              <p className="text-[11px] text-slate-500 font-mono">
-                {/* TODO: backend integration required */}
-                Status: Pending backend integration
-              </p>
-            </div>
-
-            <Button
-              variant="secondary"
-              onClick={() => setShowReportModal(false)}
-              className="w-full text-xs font-mono"
-            >
-              Close
-            </Button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

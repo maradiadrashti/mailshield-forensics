@@ -127,6 +127,11 @@ async def get_email_forensic_headers_alias(
     status_code=status.HTTP_200_OK,
     summary="Generate and download a PDF forensic investigation report"
 )
+@router.get(
+    "/forensics/emails/{email_id}/report",
+    status_code=status.HTTP_200_OK,
+    summary="Generate and download a PDF forensic investigation report (alias)"
+)
 async def get_forensic_report(
     email_id: str,
     db: Session = Depends(get_db),

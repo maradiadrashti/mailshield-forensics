@@ -213,8 +213,37 @@ class ScoringEngine:
         else:
             content_risk = 0
 
+        # --- D. Misinformation & Factual Integrity Analysis ---
+        misinfo_result = MisinformationAnalyzer.analyze_text(body_str, subject_str)
+        credibility = misinfo_result.get("credibility_score", 100)
+        suspicious_sentences = misinfo_result.get("suspicious_sentences", [])
+        misinfo_evidence = misinfo_result.get("evidence", [])
+        misinfo_risk = 0
+
+        if credibility < 75 or suspicious_sentences:
+            misinfo_risk = min(100, max(0, 100 - credibility))
+            for ss in suspicious_sentences:
+                sig = f"Suspicious claim flagged: \"{ss.get('sentence', '')[:80]}...\" ({ss.get('risk', 'Unverified')})"
+                if sig not in layer_signals:
+                    layer_signals.append(sig)
+                if ss.get('risk') not in reasons:
+                    reasons.append(f"Unverified or manipulative claim: {ss.get('risk')}")
+            for ev in misinfo_evidence:
+                if ev not in reasons:
+                    reasons.append(ev)
+            recommendations.append("Content contains sensationalist or unverified claims. Independently verify factual integrity before forwarding.")
+            layer_details["has_misinformation"] = True
+            layer_details["misinformation_findings"] = suspicious_sentences
+            layer_details["credibility_score"] = credibility
+        else:
+            layer_details["has_misinformation"] = False
+            layer_details["credibility_score"] = 100
+            layer_details["misinformation_findings"] = []
+
+        layer_details["misinfo_risk"] = misinfo_risk
+
         # Layer 1 Risk is the highest genuine threat vector identified in content
-        layer1_risk = max(attachment_risk, url_risk, content_risk)
+        layer1_risk = max(attachment_risk, url_risk, content_risk, misinfo_risk)
 
         layer_details["attachment_risk"] = attachment_risk
         layer_details["url_risk"] = url_risk
@@ -393,23 +422,37 @@ class ScoringEngine:
         subject: str,
         body_text: str,
         sender: str,
+        links: list[str],
+        attachments: list[dict],
         historical_emails: Optional[list],
-        is_trusted_sender: bool,
-        reasons: list[str],
-        recommendations: list[str]
+        historical_results: Optional[list] = None,
+        impersonation_candidates: Optional[list] = None,
+        is_trusted_sender: bool = False,
+        reasons: list[str] = None,
+        recommendations: list[str] = None
     ) -> tuple[int, list[str], dict[str, Any]]:
         """
-        Layer 3: AI Behavioral / Historical Analysis
-        Produces layer3_risk (0 to 100).
-        New senders return insufficient_history with 0 risk.
-        Known consistent senders return known_sender with 0 risk.
+        Layer 3: AI Behavioral / Historical Analysis (0 - 100 Risk)
+        Performs real-time multi-dimensional comparison against the user's previous email corpus:
+        - Prior communication count & historical threat/safety baseline
+        - Display Name Impersonation / Business Email Compromise (BEC) detection
+        - Attachment behavioral shift (e.g. unexpected attachments from non-attachment sender)
+        - Link / Destination domain novelty against sender history
+        - Urgency & coercion sentiment deviation from calm baseline
+        - Zero-shot transformer NLP threat classification
         """
+        if reasons is None:
+            reasons = []
+        if recommendations is None:
+            recommendations = []
+
         layer_signals: list[str] = []
         layer_details: dict[str, Any] = {
             "has_history": False,
             "history_count": 0,
             "historical_status": "insufficient_history",
             "has_behavioral_anomaly": False,
+            "has_impersonation_anomaly": False,
             "risk": 0
         }
 
@@ -419,11 +462,12 @@ class ScoringEngine:
 
         history_list = historical_emails or []
         history_count = len(history_list)
-
         layer3_risk = 0
 
+        # ------------------------------------------------------------------
+        # 1. Historical Communication Count & Risk Profile
+        # ------------------------------------------------------------------
         if history_count == 0:
-            # NO SENDER HISTORY: Insufficient history -> NEUTRAL (0 risk)
             layer_details["has_history"] = False
             layer_details["history_count"] = 0
             layer_details["historical_status"] = "insufficient_history"
@@ -433,43 +477,147 @@ class ScoringEngine:
             # Check if this first-time sender is using authentic phishing/extortion lures
             has_lures = any(p.search(full_content) for p in AUTHENTIC_LURE_PATTERNS)
             if has_lures:
-                layer3_risk = 60
+                layer3_risk = max(layer3_risk, 65)
                 sig_urge = "First-time sender exhibiting immediate credential harvesting / payment demand pattern"
                 layer_signals.append(sig_urge)
                 reasons.append(sig_urge)
-            else:
-                # Normal first-time sender = 0 risk!
-                layer3_risk = 0
-
+                layer_details["has_behavioral_anomaly"] = True
         else:
-            # KNOWN SENDER: Real baseline comparison
             layer_details["has_history"] = True
             layer_details["history_count"] = history_count
             layer_details["historical_status"] = "known_sender"
 
-            # Check if historical emails were routine and calm
-            hist_urgency_count = sum(
+            # Check prior analysis results to establish historical risk baseline
+            past_scores = [
+                r.risk_score for r in (historical_results or [])
+                if hasattr(r, 'risk_score') and r.risk_score is not None
+            ]
+            if past_scores:
+                avg_risk = sum(past_scores) / len(past_scores)
+                layer_details["historical_avg_risk"] = round(avg_risk, 1)
+                if avg_risk < 25 and len(past_scores) >= 1:
+                    layer_signals.append(
+                        f"Historical safety baseline: {history_count} previous email(s) analyzed with low risk (avg: {int(avg_risk)}/100, verified safe)"
+                    )
+                elif avg_risk >= 50:
+                    repeat_risk = int(avg_risk * 0.7)
+                    layer3_risk = max(layer3_risk, repeat_risk)
+                    sig = f"Repeat threat pattern: sender has history of flagged emails in database (historical avg risk: {int(avg_risk)}/100)"
+                    layer_signals.append(sig)
+                    reasons.append(sig)
+                    layer_details["has_behavioral_anomaly"] = True
+            else:
+                layer_signals.append(f"Known sender with {history_count} previous interaction(s) recorded in inbox history")
+
+        # ------------------------------------------------------------------
+        # 2. Real-Time Display Name Impersonation / BEC Detection
+        # ------------------------------------------------------------------
+        if impersonation_candidates:
+            known_senders = list(dict.fromkeys(
+                getattr(c, 'sender', '') for c in impersonation_candidates if getattr(c, 'sender', '')
+            ))
+            if known_senders:
+                clean_disp = sender.split("<")[0].strip().strip('"').strip("'") if "<" in sender else sender
+                bec_sig = (
+                    f"Executive/Display Name Spoofing: display name '{clean_disp}' was previously used by "
+                    f"legitimate contact ({known_senders[0]}), but current message originates from unrecognized address '{sender}'"
+                )
+                layer_signals.append(bec_sig)
+                reasons.append(bec_sig)
+                recommendations.append(
+                    "CRITICAL: Suspected Business Email Compromise (BEC). Verify sender identity independently before replying or trusting content."
+                )
+                layer3_risk = max(layer3_risk, 85)
+                layer_details["has_impersonation_anomaly"] = True
+                layer_details["has_behavioral_anomaly"] = True
+
+        # ------------------------------------------------------------------
+        # 3. Attachment Baseline Behavioral Anomaly
+        # ------------------------------------------------------------------
+        current_att_count = len(attachments or [])
+        if history_count >= 2 and current_att_count > 0:
+            hist_att_count = sum(len(getattr(h, 'attachments', []) or []) for h in history_list)
+            if hist_att_count == 0:
+                att_sig = (
+                    f"Unprecedented attachment: sender has 0 attachments across {history_count} prior emails, "
+                    f"but current email contains {current_att_count} attachment(s)"
+                )
+                layer_signals.append(att_sig)
+                reasons.append(att_sig)
+                recommendations.append("Sender has never sent attachments in prior communications. Exercise caution before opening files.")
+                layer3_risk = max(layer3_risk, 45)
+                layer_details["has_behavioral_anomaly"] = True
+
+        # ------------------------------------------------------------------
+        # 4. Link / Destination Domain Novelty Anomaly
+        # ------------------------------------------------------------------
+        if history_count >= 2 and links:
+            current_domains = set()
+            for u in links:
+                try:
+                    loc = urlparse(u).netloc.lower()
+                    if loc:
+                        current_domains.add(loc)
+                except Exception:
+                    pass
+            hist_domains = set()
+            for h in history_list:
+                for u in (getattr(h, 'links', []) or []):
+                    try:
+                        loc = urlparse(u).netloc.lower()
+                        if loc:
+                            hist_domains.add(loc)
+                    except Exception:
+                        pass
+            novel_domains = [
+                d for d in current_domains
+                if d not in hist_domains and not URLAnalyzer.is_known_safe_infrastructure(d)
+            ]
+            if novel_domains:
+                domain_sig = f"Unseen external link: email directs to domain '{novel_domains[0]}' never observed in prior communications with this sender"
+                layer_signals.append(domain_sig)
+                reasons.append(domain_sig)
+                layer3_risk = max(layer3_risk, 40)
+                layer_details["has_behavioral_anomaly"] = True
+
+        # ------------------------------------------------------------------
+        # 5. Urgency & Coercion Sentiment Spike vs Historical Baseline
+        # ------------------------------------------------------------------
+        if history_count > 0:
+            hist_urgency = sum(
                 1 for h in history_list
                 if any(p.search(f"{getattr(h, 'subject', '')} {getattr(h, 'body_text', '')}") for p in AUTHENTIC_LURE_PATTERNS)
             )
-
-            is_historically_calm = (hist_urgency_count == 0)
             current_has_lures = any(p.search(full_content) for p in AUTHENTIC_LURE_PATTERNS)
-
-            # Anomaly: Known sender historically calm suddenly sends extortion/credential phishing
-            if is_historically_calm and current_has_lures:
-                layer3_risk = 75
-                signal = f"Sender behavior differs from historical baseline: sudden urgency/coercion spike across {history_count} previous interactions"
-                layer_signals.append(signal)
-                reasons.append(signal)
+            if hist_urgency == 0 and current_has_lures:
+                urge_sig = f"Sudden urgency spike: sender tone differs significantly from calm historical baseline ({history_count} prior calm emails)"
+                layer_signals.append(urge_sig)
+                reasons.append(urge_sig)
                 recommendations.append("Known sender is exhibiting unprecedented urgency. Verify identity via an independent communication channel.")
+                layer3_risk = max(layer3_risk, 75)
                 layer_details["has_behavioral_anomaly"] = True
-            else:
-                # Normal consistent behavior with known sender = 0 risk!
-                layer3_risk = 0
-                signal = f"Known sender with consistent communication history ({history_count} prior messages; no behavioral anomaly)"
-                layer_signals.append(signal)
+            elif current_has_lures:
+                layer3_risk = max(layer3_risk, 60)
 
+        # ------------------------------------------------------------------
+        # 6. AI NLP Zero-Shot Threat Classification (HuggingFace / Heuristics)
+        # ------------------------------------------------------------------
+        try:
+            hf_scores = HuggingFaceClient.classify_text(full_content, cls.CANDIDATE_LABELS)
+            if hf_scores:
+                phish_prob = hf_scores.get("phishing email requesting credentials", 0.0)
+                scam_prob = hf_scores.get("scam or invoice fraud requesting money", 0.0)
+                soc_prob = hf_scores.get("social engineering or executive impersonation", 0.0)
+                max_threat_prob = max(phish_prob, scam_prob, soc_prob)
+                if max_threat_prob >= 0.70:
+                    nlp_sig = f"AI transformer classifier detected high threat probability ({int(max_threat_prob * 100)}%)"
+                    layer_signals.append(nlp_sig)
+                    layer3_risk = max(layer3_risk, int(max_threat_prob * 80))
+                    layer_details["nlp_threat_probability"] = round(max_threat_prob, 2)
+        except Exception as e:
+            logger.debug(f"HuggingFace inference skipped: {e}")
+
+        # Final Layer 3 status & details
         layer_details["risk"] = layer3_risk
 
         if layer3_risk >= 75:
@@ -502,7 +650,9 @@ class ScoringEngine:
         route_hops: list = None,
         received_chain: list = None,
         raw_headers: list = None,
-        historical_emails: list = None
+        historical_emails: list = None,
+        historical_results: list = None,
+        impersonation_candidates: list = None
     ) -> dict:
         reasons: list[str] = []
         recommendations: list[str] = []
@@ -557,19 +707,23 @@ class ScoringEngine:
             recommendations=recommendations
         )
 
-        # Layer 3: AI Behavioral & Historical Analysis
+        # Layer 3: AI Behavioral & Historical Analysis (real previous emails comparison)
         l3_risk, l3_signals, l3_details = cls.analyze_layer3_behavioral_ai(
             subject=subject,
             body_text=body_text,
             sender=clean_sender_email,
+            links=links or [],
+            attachments=attachments or [],
             historical_emails=historical_emails or [],
+            historical_results=historical_results or [],
+            impersonation_candidates=impersonation_candidates or [],
             is_trusted_sender=is_trusted_or_whitelisted,
             reasons=reasons,
             recommendations=recommendations
         )
 
         # ------------------------------------------------------------------
-        # FORMULA (STEP 9):
+        # COMPOSITE THREAT WEIGHTING:
         # final_score = (layer1_risk * 0.45) + (layer2_risk * 0.20) + (layer3_risk * 0.35)
         # ------------------------------------------------------------------
         weighted_score = (l1_risk * 0.45) + (l2_risk * 0.20) + (l3_risk * 0.35)
@@ -594,17 +748,21 @@ class ScoringEngine:
             severity = "safe"
 
         # ------------------------------------------------------------------
-        # DYNAMIC EVIDENCE-BASED PRIMARY VERDICT (STEP 12)
+        # DYNAMIC EVIDENCE-BASED PRIMARY VERDICT
         # ------------------------------------------------------------------
         if overall_score < 25:
             verdict = "No Significant Threat Detected"
         else:
-            if l1_details.get("has_suspicious_attachment"):
+            if l3_details.get("has_impersonation_anomaly"):
+                verdict = "Executive Impersonation (BEC)"
+            elif l1_details.get("has_suspicious_attachment"):
                 verdict = "Malicious Attachment Detected"
             elif l1_details.get("has_suspicious_url"):
                 verdict = "Suspicious URL Detected"
+            elif l1_details.get("has_misinformation"):
+                verdict = "Misinformation & Fraud Detected"
             elif l2_details.get("has_impersonation") or l2_details.get("has_header_spoofing"):
-                verdict = "Possible Impersonation"
+                verdict = "Header Spoofing / Impersonation"
             elif l3_details.get("has_behavioral_anomaly"):
                 verdict = "Sender Behavior Anomaly"
             elif l1_details.get("has_credential_phishing") or (l1_risk >= 60 and l2_risk >= 50):
@@ -657,10 +815,16 @@ class ScoringEngine:
             }
         }
 
+        # Calculate actual metric category scores
+        misinfo_subscore = int(round(l1_details.get("misinfo_risk", 0) * 0.40))
+        phishing_subscore = l1_ui_score if l1_details.get("has_credential_phishing") or l1_details.get("has_suspicious_url") else 0
+        scam_subscore = l2_ui_score if l2_details.get("has_impersonation") or l2_details.get("has_header_spoofing") else 0
+        social_subscore = l3_ui_score if l3_details.get("has_behavioral_anomaly") else 0
+
         breakdown = {
             "auth_score": l2_ui_score,
-            "geo_score": 0,
-            "url_score": l1_ui_score,
+            "geo_score": int(round(l2_details.get("routing_risk", 0) * 0.25)),
+            "url_score": int(round(l1_details.get("url_risk", 0) * 0.40)),
             "nlp_score": l3_ui_score,
             "header_score": l2_ui_score,
 
@@ -668,10 +832,10 @@ class ScoringEngine:
             "verdict": verdict,
             "severity": severity,
 
-            "phishing_score": l1_ui_score,
-            "scam_score": l2_ui_score,
-            "misinformation_score": 0,
-            "social_engineering_score": l3_ui_score
+            "phishing_score": phishing_subscore,
+            "scam_score": scam_subscore,
+            "misinformation_score": misinfo_subscore,
+            "social_engineering_score": social_subscore
         }
 
         unique_reasons = list(dict.fromkeys(reasons))
