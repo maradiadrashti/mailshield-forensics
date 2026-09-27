@@ -443,17 +443,16 @@ class ScoringEngine:
                     recommendations.append(f"CAUTION: Replies go to '{reply_domain}', not the sender's domain.")
                     layer_details["has_impersonation"] = True
 
-        # Composite Layer 2: auth(50%) + header(30%) + routing(20%)
-        # Auth is most forensically definitive, header mismatches secondary, routing tertiary
-        layer2_risk = min(
-            100,
-            int(auth_risk * 0.50) + int(header_risk * 0.30) + int(routing_risk * 0.20)
-        )
-        # Floor enforcement: high individual vectors guarantee minimum layer score
-        if auth_risk >= 70 or header_risk >= 55:
-            layer2_risk = max(layer2_risk, 50)
-        if routing_risk >= 60:
-            layer2_risk = max(layer2_risk, 40)
+        # Composite Layer 2: Primary threat vector (auth, header, or routing) plus corroboration
+        primary_l2 = max(auth_risk, header_risk, routing_risk)
+        # Find secondary indicator if any
+        sub_indicators = sorted([auth_risk, header_risk, routing_risk], reverse=True)
+        secondary_l2 = sub_indicators[1] if len(sub_indicators) > 1 else 0
+
+        if primary_l2 > 0 and secondary_l2 > 0:
+            layer2_risk = min(100, primary_l2 + int(secondary_l2 * 0.15))
+        else:
+            layer2_risk = primary_l2
 
         layer_details["auth_risk"] = auth_risk
         layer_details["routing_risk"] = routing_risk
@@ -792,10 +791,23 @@ class ScoringEngine:
 
         # ------------------------------------------------------------------
         # COMPOSITE THREAT WEIGHTING:
-        # final_score = (layer1_risk * 0.45) + (layer2_risk * 0.20) + (layer3_risk * 0.35)
+        # Standard weighted composite: L1 (45%), L2 (20%), L3 (35%)
+        # Dominance Floor: Severe single-vector threats (e.g., malware, spoofing, BEC)
+        # must never be masked to zero or 'safe' by absence of signals in other layers.
         # ------------------------------------------------------------------
         weighted_score = (l1_risk * 0.45) + (l2_risk * 0.20) + (l3_risk * 0.35)
-        overall_score = min(100, max(0, int(round(weighted_score))))
+
+        max_layer_risk = max(l1_risk, l2_risk, l3_risk)
+        if max_layer_risk >= 80:
+            dominant_floor = int(max_layer_risk * 0.65)
+        elif max_layer_risk >= 50:
+            dominant_floor = int(max_layer_risk * 0.50)
+        elif max_layer_risk >= 30:
+            dominant_floor = int(max_layer_risk * 0.40)
+        else:
+            dominant_floor = 0
+
+        overall_score = min(100, max(0, int(round(weighted_score)), dominant_floor))
 
         # Confidence: highest when we have analyzed historical baseline, lowest for first-time senders
         if l3_details.get("historical_analyzed_count", 0) >= 3:
@@ -828,7 +840,7 @@ class ScoringEngine:
             verdict = "Malicious Attachment Detected"
         elif l1_details.get("has_suspicious_url"):
             verdict = "Suspicious URL / Phishing Link"
-        elif l2_details.get("has_header_spoofing") and l2_details.get("auth_risk", 0) >= 70:
+        elif l2_details.get("has_header_spoofing") and l2_details.get("auth_risk", 0) >= 60:
             verdict = "Email Authentication Spoofing"
         elif l1_details.get("has_misinformation"):
             verdict = "Misinformation / Fraud Content"

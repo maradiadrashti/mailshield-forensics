@@ -1,4 +1,5 @@
 import re
+from difflib import SequenceMatcher
 from urllib.parse import urlparse
 
 # Recognized official multi-domain infrastructures for trusted brands
@@ -138,24 +139,73 @@ class URLAnalyzer:
             vector_scores["https_score"] = 15
 
         # Vector 2: Typosquatting & Brand Spoofing Check
+        # Detects: keyword presence (paypal-secure.com), homoglyphs (paypa1.com, g00gle.com),
+        # and high-similarity fuzzy matches against all known official brand domains.
         is_typosquatting = False
         spoofed_brand = None
 
+        # Homoglyph substitution map (single character lookalike substitutions)
+        HOMOGLYPH_MAP = str.maketrans({
+            '0': 'o', '1': 'l', '3': 'e', '4': 'a', '5': 's',
+            '6': 'g', '7': 't', '8': 'b', '@': 'a', '!': 'i'
+        })
+
         if not is_safe_infra:
+            # Strip port and extract base domain label for comparison
+            base_hostname = hostname.split(':')[0].replace('vv', 'w')  # handle 'vv'->'w'
+            hostname_normalized = base_hostname.translate(HOMOGLYPH_MAP)  # normalize homoglyphs
+            # Remove common subdomains (www, mail, login, secure, etc.) for core brand check
+            core_parts = hostname_normalized.split('.')
+            # Use full hostname and without first subdomain for matching
+            hostname_variants = [hostname_normalized, '.'.join(core_parts[1:]) if len(core_parts) > 2 else hostname_normalized]
+
             for brand, valid_domains in BRAND_OFFICIAL_DOMAINS.items():
+                if is_typosquatting:
+                    break
+                brand_normalized = brand.translate(HOMOGLYPH_MAP)
+
+                # Method A: Direct brand keyword in raw hostname (e.g. paypal-security-login.com)
                 if brand in hostname:
                     if not cls.is_official_domain(hostname, brand):
-                        # Detect deceptive patterns (e.g. paypal-security-login.com, login-google-auth.xyz, paypaI.com)
                         is_typosquatting = True
                         spoofed_brand = brand.capitalize()
                         vector_scores["typosquatting_score"] = 90
-                        reasons.append(f"Domain '{hostname}' uses brand typosquatting/lookalike spoofing targeting {spoofed_brand}")
+                        reasons.append(f"Domain '{hostname}' uses brand name '{brand}' in a lookalike/spoofing domain not owned by {spoofed_brand}")
                         recommendations.append(f"Do NOT enter credentials on '{hostname}'. It is impersonating {spoofed_brand}.")
+                        break
+
+                # Method B: Homoglyph-normalized match (catches paypa1.com -> paypal, g00gle.com -> google)
+                if brand_normalized in hostname_normalized:
+                    if not cls.is_official_domain(hostname, brand):
+                        is_typosquatting = True
+                        spoofed_brand = brand.capitalize()
+                        vector_scores["typosquatting_score"] = 90
+                        reasons.append(f"Domain '{hostname}' uses character-substitution homoglyph attack impersonating {spoofed_brand} (e.g. 0→o, 1→l)")
+                        recommendations.append(f"ALERT: '{hostname}' visually mimics {spoofed_brand} using look-alike characters. Do NOT enter credentials.")
+                        break
+
+                # Method C: Fuzzy string similarity against each official brand domain
+                for official_domain in valid_domains:
+                    for variant in hostname_variants:
+                        # Compare the variant without TLD against the official domain without TLD
+                        h_base = variant.rsplit('.', 1)[0] if '.' in variant else variant
+                        o_base = official_domain.rsplit('.', 1)[0] if '.' in official_domain else official_domain
+                        if len(h_base) < 4 or len(o_base) < 4:
+                            continue
+                        similarity = SequenceMatcher(None, h_base, o_base).ratio()
+                        if similarity >= 0.82 and variant != official_domain and not cls.is_official_domain(hostname, brand):
+                            is_typosquatting = True
+                            spoofed_brand = brand.capitalize()
+                            vector_scores["typosquatting_score"] = 85
+                            reasons.append(f"Domain '{hostname}' is highly similar (similarity={similarity:.0%}) to legitimate {spoofed_brand} domain '{official_domain}'")
+                            recommendations.append(f"HIGH RISK: '{hostname}' closely resembles '{official_domain}'. Verify the URL before entering any credentials.")
+                            break
+                    if is_typosquatting:
                         break
 
             # Check for suspicious TLDs on unknown domains
             if not is_typosquatting and any(hostname.endswith(tld) for tld in SUSPICIOUS_TLDS):
-                vector_scores["domain_length_score"] = 35
+                vector_scores["domain_length_score"] = 45  # Raised: suspicious TLD is a meaningful indicator
                 reasons.append(f"Domain uses high-abuse/suspicious top-level domain extension ('{hostname}')")
 
         # Vector 3: URL Shorteners Check (forms.gle is official Google forms; only check generic shorteners)
