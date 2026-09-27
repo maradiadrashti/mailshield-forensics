@@ -23,7 +23,6 @@ from app.schemas.dashboard import (
     WeeklyDataPoint,
     DashboardStatsResponse,
 )
-from app.schemas.ocr import OCRAnalysisResponse
 
 __all__ = [
     "HealthCheckResponse",
@@ -43,5 +42,5 @@ __all__ = [
     "ThreatCategoriesBreakdown",
     "WeeklyDataPoint",
     "DashboardStatsResponse",
-    "OCRAnalysisResponse",
 ]
+

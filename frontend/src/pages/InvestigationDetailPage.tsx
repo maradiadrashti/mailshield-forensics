@@ -12,7 +12,6 @@ import {
   Layers,
   KeyRound,
   FileSearch,
-  X,
   MapPin,
   Cpu,
   Link2,

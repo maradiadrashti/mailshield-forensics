@@ -168,19 +168,6 @@ export interface DashboardStats {
   security_recommendations: string[];
 }
 
-export interface OCRAnalysisResponse {
-  filename: string;
-  extracted_text: string;
-  extracted_urls: string[];
-  risk_score: number;
-  confidence: number;
-  threat_type: string;
-  reasons: string[];
-  recommendations: string[];
-  breakdown: ThreatBreakdown;
-  scanned_at: string;
-}
-
 export interface EmailAuthenticationResult {
   spf: 'pass' | 'fail' | 'neutral' | 'unknown';
   dkim: 'pass' | 'fail' | 'neutral' | 'unknown';

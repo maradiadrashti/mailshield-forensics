@@ -49,7 +49,7 @@ MailShield's scoring engine runs on an audited, non-dummy mathematical evaluatio
    | * SPF / DKIM / DMARC      |    | * HuggingFace Zero-Shot   |    | * Hop-by-Hop Relay Trace  |
    | * Return-Path Alignment   |    | * Urgency & Coercion NLP  |    | * GeoIP2 / ASN Country Res|
    | * From Display Spoofing   |    | * Credential Harvest Cues |    | * Datacenter / VPN Flags  |
-   | * Mailer & Client Checks  |    | * OCR Screenshot Parsing  |    | * 6-Vector URL Threat Scan|
+   | * Mailer & Client Checks  |    | * Psychological Heuristics|    | * 6-Vector URL Threat Scan|
    +---------------------------+    +---------------------------+    +---------------------------+
                  |                                |                                |
                  +--------------------------------+--------------------------------+
@@ -72,7 +72,7 @@ MailShield's scoring engine runs on an audited, non-dummy mathematical evaluatio
 | Layer | Weight | Focus Areas & Deterministic Vectors |
 | :--- | :---: | :--- |
 | **Layer 1: Technical & Protocol Forensics** | **45%** | • **SPF, DKIM, DMARC** hard/soft/temp-fail checks<br>• `Return-Path` vs `From` domain alignment<br>• Display name spoofing (e.g. `PayPal Support <attacker@gmail.com>`)<br>• Message-ID syntax anomalies & missing mandatory RFC 5322 headers |
-| **Layer 2: AI & Linguistic Threat Analysis** | **20%** | • **HuggingFace Zero-Shot Transformer** classification (`facebook/bart-large-mnli`)<br>• Social engineering vectors: Urgency, Fear, Financial Wire / Gift Card demands<br>• Credential harvesting lures & impersonation patterns<br>• OCR extraction on embedded screenshots & image attachments |
+| **Layer 2: AI & Linguistic Threat Analysis** | **20%** | • **HuggingFace Zero-Shot Transformer** classification (`facebook/bart-large-mnli`)<br>• Social engineering vectors: Urgency, Fear, Financial Wire / Gift Card demands<br>• Credential harvesting lures & impersonation patterns<br>• Misinformation, manipulative assertions & semantic credibility analysis |
 | **Layer 3: Infrastructure & Geolocation** | **35%** | • **Hop-by-Hop MTA relay extraction** and Chronological Route Mapping<br>• **MaxMind GeoIP2 & ASN** geolocation resolution<br>• Datacenter, VPN, Tor, and Commercial Proxy IP flagging<br>• **6-Vector URL Threat Inspection** (Typosquatting, Punycode, URL Shorteners, IP Hostnames, Suspicious TLDs, Overly Long Domains) |
 
 ---
@@ -118,7 +118,7 @@ MailShield's scoring engine runs on an audited, non-dummy mathematical evaluatio
 | **Database & ORM** | SQLAlchemy 2.0, SQLite | Zero-dependency embedded structured storage |
 | **Forensic PDF Engine** | ReportLab 5.0 | Section 65B compliant automated PDF dossiers |
 | **Threat Intelligence** | MaxMind GeoIP2, dnspython | Geolocation, ASN lookup, and DNS record parsing |
-| **AI / Machine Learning**| HuggingFace Transformers, PIL | NLP zero-shot classification & OCR screenshot scan |
+| **AI / Machine Learning**| HuggingFace Transformers | NLP zero-shot threat classification & intent analysis |
 
 ---
 
