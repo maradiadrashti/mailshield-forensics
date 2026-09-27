@@ -1,9 +1,10 @@
 @echo off
 setlocal enabledelayedexpansion
-title MailShield AI - Startup Launcher
+title MailShield Forensics - Startup Launcher (SIH26106)
 
 echo ====================================================================
-echo   MailShield AI - Enterprise Cybersecurity & Forensics Platform
+echo   MailShield Forensics - AI Threat Detection & Forensics Platform
+echo   Smart India Hackathon (SIH26106) | Cybersecurity & Forensics
 echo ====================================================================
 echo.
 
@@ -23,6 +24,6 @@ python start.py %*
 
 if %errorlevel% neq 0 (
     echo.
-    echo [NOTICE] MailShield terminated.
+    echo [NOTICE] MailShield Forensics terminated.
     pause
 )

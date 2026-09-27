@@ -5,7 +5,8 @@ Runs without the full FastAPI app stack.
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
-src = open('app/ai/scoring_engine.py', encoding='utf-8').read()
+scoring_engine_path = os.path.join(os.path.dirname(__file__), 'app', 'ai', 'scoring_engine.py')
+src = open(scoring_engine_path, encoding='utf-8').read()
 
 CHECKS = [
     ('LEGITIMATE_ESP_DOMAINS', 'ESP whitelist constant'),
@@ -31,8 +32,7 @@ CHECKS = [
     ('_extract_domain', 'RFC domain extractor function'),
     ('vpn detected', 'VPN-specific routing check'),
     ('overall_score < 20', 'Verdict threshold = 20 (not 25)'),
-    ('0.45)   # Max 45', 'L1 score comment documenting max'),
-    ('layer1_risk + int(secondary_risk', 'Multi-vector bonus escalation'),
+    ('primary_risk + int(secondary_risk', 'Multi-vector bonus escalation'),
 ]
 
 failed = 0

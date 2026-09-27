@@ -61,3 +61,6 @@ backend/data/geolite/
 .DS_Store
 Thumbs.db
 *.zip
+logs/
+*.log
+

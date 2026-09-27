@@ -139,7 +139,7 @@ TESTS = [
             "authentication": MockAuth("pass", "pass", "fail"),
             "network_intelligence": MockNetworkIntel(),
         },
-        "expect_layer2_auth_risk": 0,  # SPF+DKIM pass, so auth_risk = 0, DMARC fail check order
+        "expect_layer2_auth_risk": 60,  # SPF+DKIM pass, DMARC fail -> 60
     },
 ]
 

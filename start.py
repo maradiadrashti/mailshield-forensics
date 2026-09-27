@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """
-MailShield AI — Unified Clean Startup & Development Orchestrator
+MailShield Forensics — Unified Clean Startup & Development Orchestrator
+Smart India Hackathon (SIH26106) Email Threat Detection & Forensic Platform
 Cross-platform supervisor for launching Backend (FastAPI) and Frontend (Vite)
-with health checks, port cleanup, log prefixing, and graceful shutdown.
+with health checks, port cleanup, quiet log management, and graceful shutdown.
 """
 
 import os
@@ -45,6 +46,7 @@ RESET = "\033[0m"
 ROOT_DIR = Path(__file__).resolve().parent
 BACKEND_DIR = ROOT_DIR / "backend"
 FRONTEND_DIR = ROOT_DIR / "frontend"
+LOGS_DIR = ROOT_DIR / "logs"
 
 def log_info(msg: str):
     print(f"{GREEN}{BOLD}[STARTUP]{RESET} {msg}", flush=True)
@@ -65,7 +67,8 @@ def print_banner():
   | |  | | (_| | | |____) | | | | |  __/ | (_| |  / ____ \\ _| |_ 
   |_|  |_|\\__,_|_|_|_____/|_| |_|_|\\___|_|\\__,_| /_/    \\_\\_____|
  ====================================================================
-  MailShield AI - Enterprise Cybersecurity & Forensics Platform
+  MailShield Forensics - AI Threat Detection & Forensic Platform
+  Smart India Hackathon (SIH26106) | Cybersecurity & Forensics
  ===================================================================={RESET}"""
     print(banner, flush=True)
 
@@ -132,14 +135,17 @@ def check_and_clear_port(port: int, service_name: str, auto_kill: bool = False):
 def check_environment(auto_install: bool = False, kill_stale: bool = False):
     log_info("Running pre-flight system diagnostics...")
 
-    # 1. Python Check
+    # 1. Ensure logs directory exists
+    LOGS_DIR.mkdir(parents=True, exist_ok=True)
+
+    # 2. Python Check
     py_ver = sys.version_info
     if py_ver < (3, 10):
         log_error(f"Python 3.10+ required. Current version is {py_ver.major}.{py_ver.minor}")
         sys.exit(1)
     log_info(f"Python runtime  : v{py_ver.major}.{py_ver.minor}.{py_ver.micro}")
 
-    # 2. Node.js & npm Check
+    # 3. Node.js & npm Check
     node_bin = shutil.which("node")
     npm_bin = shutil.which("npm")
     if not node_bin or not npm_bin:
@@ -152,7 +158,7 @@ def check_environment(auto_install: bool = False, kill_stale: bool = False):
     except Exception:
         log_warn("Could not retrieve Node.js version, proceeding anyway.")
 
-    # 3. Virtual Environment Check
+    # 4. Virtual Environment Check
     venv_py = get_venv_python()
     if not venv_py.exists():
         log_warn(f"Backend virtual environment not found at {venv_py.parent.parent}")
@@ -160,12 +166,12 @@ def check_environment(auto_install: bool = False, kill_stale: bool = False):
         subprocess.run([sys.executable, "-m", "venv", str(BACKEND_DIR / ".venv")], check=True)
         auto_install = True
 
-    # 4. Backend Dependencies
+    # 5. Backend Dependencies
     if auto_install:
         log_info("Installing backend dependencies from requirements.txt...")
         subprocess.run([str(venv_py), "-m", "pip", "install", "-r", str(BACKEND_DIR / "requirements.txt")], check=True)
 
-    # 5. Backend .env check
+    # 6. Backend .env check
     backend_env = BACKEND_DIR / ".env"
     if not backend_env.exists():
         log_warn("backend/.env not found! Generating fresh configuration from .env.example...")
@@ -177,7 +183,7 @@ def check_environment(auto_install: bool = False, kill_stale: bool = False):
             env_content = (
                 "ENVIRONMENT=development\n"
                 "DEBUG=True\n"
-                "PROJECT_NAME=MailShield AI\n"
+                "PROJECT_NAME=MailShield Forensics\n"
                 "SECRET_KEY=change-me\n"
                 "JWT_SECRET=change-me\n"
                 "DATABASE_URL=sqlite:///./mailshield.db\n"
@@ -192,23 +198,31 @@ def check_environment(auto_install: bool = False, kill_stale: bool = False):
         backend_env.write_text(env_content, encoding="utf-8")
         log_info(f"Created {backend_env} with generated security keys.")
 
-    # 6. Frontend node_modules check
+    # 7. Frontend node_modules check
     if not (FRONTEND_DIR / "node_modules").exists() or auto_install:
         log_info("Frontend node_modules missing. Running npm install...")
         subprocess.run(["npm", "install"], cwd=str(FRONTEND_DIR), shell=True, check=True)
 
-    # 7. Check Ports
+    # 8. Check Ports
     check_and_clear_port(8000, "FastAPI Backend", auto_kill=kill_stale)
     check_and_clear_port(3000, "Vite Frontend", auto_kill=kill_stale)
 
     log_info("Pre-flight checks completed successfully!\n")
 
-def stream_logs(pipe, prefix: str, color: str):
+def stream_and_write_logs(pipe, prefix: str, color: str, log_file_path: Path, verbose: bool = False):
+    """Write all process output cleanly to a log file; only stream to terminal if verbose or an error occurs."""
     try:
-        for line in iter(pipe.readline, ''):
-            if line:
-                line_str = line.rstrip()
-                print(f"{color}{BOLD}[{prefix}]{RESET} {line_str}", flush=True)
+        with open(log_file_path, "a", encoding="utf-8", errors="replace") as f_out:
+            for line in iter(pipe.readline, ''):
+                if line:
+                    line_str = line.rstrip()
+                    f_out.write(line_str + "\n")
+                    f_out.flush()
+                    if verbose:
+                        print(f"{color}{BOLD}[{prefix}]{RESET} {line_str}", flush=True)
+                    elif "ERROR" in line_str.upper() or "CRITICAL" in line_str.upper() or "EXCEPTION" in line_str.upper():
+                        # Only show critical errors in terminal when in quiet/normal mode
+                        print(f"{RED}{BOLD}[{prefix} ERROR]{RESET} {line_str}", flush=True)
     except (ValueError, OSError):
         pass
     finally:
@@ -251,12 +265,13 @@ def open_browser(url: str):
         pass
 
 def main():
-    parser = argparse.ArgumentParser(description="MailShield AI Clean Startup Orchestrator")
+    parser = argparse.ArgumentParser(description="MailShield Forensics Clean Startup Orchestrator (SIH26106)")
     parser.add_argument("--no-browser", action="store_true", help="Do not automatically launch web browser")
     parser.add_argument("--backend-only", action="store_true", help="Run only the FastAPI backend")
     parser.add_argument("--frontend-only", action="store_true", help="Run only the Vite frontend")
     parser.add_argument("--kill-stale", action="store_true", help="Auto-kill any processes occupying port 8000 or 3000")
     parser.add_argument("--install", action="store_true", help="Force install backend and frontend dependencies")
+    parser.add_argument("--verbose", action="store_true", help="Stream all continuous HTTP/backend logs to the terminal")
     args = parser.parse_args()
 
     print_banner()
@@ -282,9 +297,20 @@ def main():
     signal.signal(signal.SIGINT, shutdown_all)
     signal.signal(signal.SIGTERM, shutdown_all)
 
+    backend_log_file = LOGS_DIR / "backend.log"
+    frontend_log_file = LOGS_DIR / "frontend.log"
+
+    # Reset log files for current session
+    try:
+        backend_log_file.write_text(f"--- MailShield Backend Log Started at {time.ctime()} ---\n", encoding="utf-8")
+        frontend_log_file.write_text(f"--- MailShield Frontend Log Started at {time.ctime()} ---\n", encoding="utf-8")
+    except Exception:
+        pass
+
     # 1. Start Backend
     if not args.frontend_only:
-        log_info(f"Starting FastAPI Backend Server on {BOLD}http://localhost:8000{RESET}...")
+        log_info(f"Starting FastAPI Backend Server on {BOLD}http://localhost:8000{RESET} (background)...")
+        log_level = "info" if args.verbose else "warning"
         backend_cmd = [
             str(venv_py),
             "-m", "uvicorn",
@@ -292,7 +318,8 @@ def main():
             "--host", "0.0.0.0",
             "--port", "8000",
             "--reload",
-            "--reload-dir", "app"
+            "--reload-dir", "app",
+            "--log-level", log_level
         ]
         
         backend_proc = subprocess.Popen(
@@ -307,14 +334,14 @@ def main():
         processes.append(backend_proc)
 
         threading.Thread(
-            target=stream_logs,
-            args=(backend_proc.stdout, "BACKEND ", CYAN),
+            target=stream_and_write_logs,
+            args=(backend_proc.stdout, "BACKEND", CYAN, backend_log_file, args.verbose),
             daemon=True
         ).start()
 
     # 2. Start Frontend
     if not args.backend_only:
-        log_info(f"Starting Vite React Frontend on {BOLD}http://localhost:3000{RESET}...")
+        log_info(f"Starting Vite React Frontend on {BOLD}http://localhost:3000{RESET} (background)...")
         npm_cmd = "npm run dev"
         frontend_proc = subprocess.Popen(
             npm_cmd,
@@ -328,8 +355,8 @@ def main():
         processes.append(frontend_proc)
 
         threading.Thread(
-            target=stream_logs,
-            args=(frontend_proc.stdout, "FRONTEND", MAGENTA),
+            target=stream_and_write_logs,
+            args=(frontend_proc.stdout, "FRONTEND", MAGENTA, frontend_log_file, args.verbose),
             daemon=True
         ).start()
 
@@ -338,26 +365,30 @@ def main():
     if not args.frontend_only:
         backend_ok = wait_for_health(timeout=25)
         if backend_ok:
-            log_info(f"{GREEN}FastAPI Backend is healthy and ready!{RESET}")
+            log_info(f"{GREEN}FastAPI Backend is healthy and operational!{RESET}")
         else:
             log_warn("Backend health check timed out, but process is running.")
 
     if not args.backend_only:
         frontend_ok = wait_for_frontend(timeout=15)
         if frontend_ok:
-            log_info(f"{GREEN}Vite Frontend dev server is listening!{RESET}")
+            log_info(f"{GREEN}Vite Frontend dev server is live and listening!{RESET}")
 
     # Print clean summary box
     summary = f"""
 {GREEN}{BOLD}+--------------------------------------------------------------------+
-|  MailShield AI Cybersecurity Platform is Live!                     |
+|  MailShield Forensics (SIH26106) Platform is Live & Operational!   |
 +--------------------------------------------------------------------+{RESET}
 |  {BOLD}Frontend UI App{RESET}    : {CYAN}{BOLD}http://localhost:3000{RESET}                        |
 |  {BOLD}Backend API Root{RESET}   : {CYAN}http://localhost:8000/api/v1{RESET}                   |
 |  {BOLD}Interactive Docs{RESET}   : {CYAN}http://localhost:8000/docs{RESET}                     |
 |  {BOLD}Health Check API{RESET}   : {CYAN}http://localhost:8000/api/v1/health{RESET}             |
+|  {BOLD}Backend Logs{RESET}       : {DIM}logs/backend.log{RESET}                               |
+|  {BOLD}Frontend Logs{RESET}      : {DIM}logs/frontend.log{RESET}                              |
 {GREEN}{BOLD}+--------------------------------------------------------------------+
-|  Press [Ctrl + C] anytime to cleanly terminate all services        |
+|  * Terminal output is kept clean. Logs saved to logs/ directory.   |
+|  * Use --verbose flag if you want to stream all HTTP requests.     |
+|  * Press [Ctrl + C] anytime to cleanly terminate all services.     |
 +--------------------------------------------------------------------+{RESET}
 """
     print(summary, flush=True)
@@ -379,3 +410,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

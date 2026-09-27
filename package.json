@@ -1,11 +1,12 @@
 {
-  "name": "mailshield-ai",
+  "name": "mailshield-forensics",
   "version": "1.0.0",
-  "description": "MailShield AI — Enterprise AI Cybersecurity & Email Forensics Platform",
+  "description": "MailShield Forensics — AI-Powered Email Threat Detection, GeoLocation & Forensic Intelligence Platform (SIH26106)",
   "private": true,
   "scripts": {
     "start": "python start.py",
     "dev": "python start.py",
+    "dev:verbose": "python start.py --verbose",
     "dev:nobrowser": "python start.py --no-browser",
     "dev:backend": "python start.py --backend-only",
     "dev:frontend": "python start.py --frontend-only",
@@ -16,11 +17,14 @@
     "cybersecurity",
     "email-forensics",
     "phishing-detection",
-    "ai",
+    "sih2026",
+    "sih26106",
+    "smart-india-hackathon",
+    "threat-intelligence",
     "fastapi",
     "react",
     "vite"
   ],
-  "author": "MailShield AI Team",
+  "author": "MailShield Forensics Team",
   "license": "MIT"
 }

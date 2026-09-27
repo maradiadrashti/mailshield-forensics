@@ -1,10 +1,10 @@
 <#
 .SYNOPSIS
-    Starts MailShield AI (FastAPI backend + Vite React frontend) with pre-flight checks and monitoring.
+    Starts MailShield Forensics (SIH26106 FastAPI backend + Vite React frontend).
 
 .DESCRIPTION
-    Launches MailShield AI development environment with automated dependency verification,
-    port collision checks, health-check polling, and graceful process management.
+    Launches MailShield Forensics development environment with automated dependency verification,
+    port collision checks, health-check polling, and quiet background log management.
 
 .PARAMETER NoBrowser
     Do not automatically open the browser once services are up.
@@ -21,10 +21,14 @@
 .PARAMETER Install
     Force reinstall backend & frontend dependencies before launching.
 
+.PARAMETER VerboseLog
+    Stream live continuous HTTP request logs to console (default: logs saved to logs/ directory).
+
 .EXAMPLE
     .\start.ps1
     .\start.ps1 -NoBrowser
     .\start.ps1 -KillStale
+    .\start.ps1 -VerboseLog
 #>
 
 [CmdletBinding()]
@@ -33,7 +37,8 @@ param(
     [switch]$BackendOnly,
     [switch]$FrontendOnly,
     [switch]$KillStale,
-    [switch]$Install
+    [switch]$Install,
+    [switch]$VerboseLog
 )
 
 Set-Location $PSScriptRoot
@@ -52,5 +57,7 @@ if ($BackendOnly)  { $pyArgs += "--backend-only" }
 if ($FrontendOnly) { $pyArgs += "--frontend-only" }
 if ($KillStale)    { $pyArgs += "--kill-stale" }
 if ($Install)      { $pyArgs += "--install" }
+if ($VerboseLog)   { $pyArgs += "--verbose" }
 
 & python @pyArgs
+
